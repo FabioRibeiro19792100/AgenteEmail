@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Composer</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body class="composer-body">
+    <main class="composer-page">
+      <header class="composer-header">
+        <div>
+          <h1>Composer</h1>
+          <p id="who" class="muted">Carregando sessao...</p>
+        </div>
+        <div class="header-actions">
+          <span id="connection" class="status-pill">Gmail desconectado</span>
+          <button id="gmailBtn" class="secondary" type="button">Conectar Gmail</button>
+          <button id="clearBtn" class="ghost compact" type="button">Limpar</button>
+          <button id="logoutBtn" class="ghost compact" type="button">Sair</button>
+        </div>
+      </header>
+
+      <section class="chat-workspace">
+        <div id="history" class="chat-stream">
+          <div class="empty-state">
+            <strong>Faça uma pergunta objetiva sobre sua caixa.</strong>
+            <span>Ex.: “quais foram minhas ultimas interacoes comerciais relevantes?”</span>
+          </div>
+        </div>
+
+        <div id="pendingActions" class="pending-strip"></div>
+
+        <form id="composerForm" class="prompt-bar">
+          <textarea id="message" rows="3" placeholder="Pergunte sobre emails, pendencias, clientes, respostas ou rascunhos..."></textarea>
+          <button id="sendBtn" type="submit">Enviar</button>
+        </form>
+      </section>
+    </main>
+
+    <script src="/assets/common.js"></script>
+    <script>
+      let session;
+
+      function escapeHtml(value) {
+        return String(value || "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      async function loadSession() {
+        session = await api("/api/session");
+        if (!session.authenticated) {
+          location.href = "/";
+          return;
+        }
+
+        el("who").textContent = `${session.user.nome} · cabine individual`;
+        el("connection").textContent = session.connections.gmailConnected
+          ? `Gmail: ${session.connections.googleEmail}`
+          : "Gmail desconectado";
+        el("connection").className = session.connections.gmailConnected
+          ? "status-pill connected"
+          : "status-pill";
+
+        renderPendingActions(session.pendingActions || []);
+      }
+
+      function ensureHistoryReady() {
+        const empty = document.querySelector(".empty-state");
+        if (empty) empty.remove();
+      }
+
+      function sourceMarkup(sources = [], queryPlan = []) {
+        if (!sources.length && !queryPlan.length) return "";
+        const sourceItems = sources.map((source) => `
+          <div class="source-row">
+            <span>${escapeHtml(source.kind || "fonte")}</span>
+            <strong>${escapeHtml(source.subject)}</strong>
+            <small>${escapeHtml(source.from)} · ${escapeHtml(source.date)}</small>
+          </div>
+        `).join("");
+
+        const queryItems = queryPlan.map((query) => `<code>${escapeHtml(query)}</code>`).join("");
+
+        return `
+          <details class="turn-evidence">
+            <summary>Fontes e busca deste turno</summary>
+            ${sourceItems || `<span class="muted">Nenhuma fonte relevante encontrada.</span>`}
+            ${queryItems ? `<div class="query-list">${queryItems}</div>` : ""}
+          </details>
+        `;
+      }
+
+      function addTurn(question, answer, sources = [], queryPlan = []) {
+        ensureHistoryReady();
+        const wrapper = document.createElement("article");
+        wrapper.className = "chat-turn";
+        wrapper.innerHTML = `
+          <div class="message user-message">${escapeHtml(question)}</div>
+          <div class="message assistant-message">
+            <div>${escapeHtml(answer)}</div>
+            ${sourceMarkup(sources, queryPlan)}
+          </div>
+        `;
+        el("history").append(wrapper);
+        el("history").scrollTop = el("history").scrollHeight;
+      }
+
+      function addSystemMessage(text) {
+        ensureHistoryReady();
+        const div = document.createElement("div");
+        div.className = "message system-message";
+        div.textContent = text;
+        el("history").append(div);
+        el("history").scrollTop = el("history").scrollHeight;
+      }
+
+      function renderPendingActions(actions) {
+        if (!actions.length) {
+          el("pendingActions").innerHTML = "";
+          return;
+        }
+
+        el("pendingActions").innerHTML = actions.map((action) => `
+          <div class="pending-action" data-action-id="${escapeHtml(action.id)}">
+            <div>
+              <strong>${escapeHtml(action.title)}</strong>
+              <span>${escapeHtml(action.summary)}</span>
+            </div>
+            ${action.editable ? `<textarea data-editor rows="4">${escapeHtml(action.previewText)}</textarea>` : `<p>${escapeHtml(action.previewText)}</p>`}
+            <div class="pending-buttons">
+              <button data-confirm type="button">${escapeHtml(action.confirmLabel)}</button>
+              <button data-cancel class="ghost compact" type="button">Cancelar</button>
+            </div>
+          </div>
+        `).join("");
+
+        document.querySelectorAll("[data-confirm]").forEach((button) => {
+          button.onclick = async () => {
+            const card = button.closest("[data-action-id]");
+            const editor = card.querySelector("[data-editor]");
+            try {
+              const data = await api(`/api/agent/actions/${card.dataset.actionId}/confirm`, {
+                method: "POST",
+                body: JSON.stringify({ editedContent: editor ? editor.value : "" })
+              });
+              addSystemMessage(data.message);
+              await loadSession();
+            } catch (error) {
+              addSystemMessage(error.message);
+            }
+          };
+        });
+
+        document.querySelectorAll("[data-cancel]").forEach((button) => {
+          button.onclick = async () => {
+            const card = button.closest("[data-action-id]");
+            try {
+              await api(`/api/agent/actions/${card.dataset.actionId}/cancel`, {
+                method: "POST",
+                body: "{}"
+              });
+              addSystemMessage("Acao cancelada.");
+              await loadSession();
+            } catch (error) {
+              addSystemMessage(error.message);
+            }
+          };
+        });
+      }
+
+      el("composerForm").onsubmit = async (event) => {
+        event.preventDefault();
+        const question = el("message").value.trim();
+        if (!question) return;
+
+        el("sendBtn").disabled = true;
+        el("sendBtn").textContent = "Analisando";
+        try {
+          const data = await api("/api/agent/message", {
+            method: "POST",
+            body: JSON.stringify({ message: question })
+          });
+          addTurn(question, data.answer, data.sources || [], data.queryPlan || []);
+          el("message").value = "";
+          if (data.pendingAction) await loadSession();
+        } catch (error) {
+          addSystemMessage(error.message);
+        } finally {
+          el("sendBtn").disabled = false;
+          el("sendBtn").textContent = "Enviar";
+        }
+      };
+
+      el("message").addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+          el("composerForm").requestSubmit();
+        }
+      });
+
+      el("clearBtn").onclick = () => {
+        el("history").innerHTML = `
+          <div class="empty-state">
+            <strong>Faça uma pergunta objetiva sobre sua caixa.</strong>
+            <span>Ex.: “quais foram minhas ultimas interacoes comerciais relevantes?”</span>
+          </div>
+        `;
+      };
+
+      el("gmailBtn").onclick = () => {
+        location.href = "/api/google/gmail/start";
+      };
+
+      el("logoutBtn").onclick = async () => {
+        await api("/api/logout", { method: "POST", body: "{}" });
+        location.href = "/";
+      };
+
+      loadSession();
+    </script>
+  </body>
+</html>

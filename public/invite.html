@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Convite Individual</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <h1>Cabine individual do aluno</h1>
+        <p id="status">Validando seu convite...</p>
+      </section>
+    </main>
+    <script src="/assets/common.js"></script>
+    <script>
+      (async () => {
+        const inviteId = location.pathname.split("/").pop();
+        try {
+          const data = await api(`/api/invite/validate?inviteId=${inviteId}`);
+          el("status").textContent = `Convite validado para ${data.user.nome}. Redirecionando...`;
+          setTimeout(() => { location.href = data.redirectTo; }, 700);
+        } catch (error) {
+          el("status").textContent = error.message;
+        }
+      })();
+    </script>
+  </body>
+</html>

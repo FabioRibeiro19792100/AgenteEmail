@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Conexoes</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <h1>Status das conexoes</h1>
+        <p id="status">Carregando...</p>
+      </section>
+      <section class="panel">
+        <div class="row">
+          <button id="gmailBtn">Conectar Gmail</button>
+          <button id="revokeBtn" class="ghost">Desconectar Gmail</button>
+          <button id="calendarBtn" class="alt">Conectar Google Calendar</button>
+        </div>
+      </section>
+    </main>
+    <script src="/assets/common.js"></script>
+    <script>
+      async function refresh() {
+        const session = await api("/api/session");
+        if (!session.authenticated) {
+          location.href = "/";
+          return;
+        }
+        const params = new URLSearchParams(location.search);
+        const statusBits = [
+          `Aluno: ${session.user.nome}`,
+          session.connections.gmailConnected
+            ? `Gmail conectado com ${session.connections.googleEmail}`
+            : "Gmail ainda nao conectado."
+        ];
+        if (session.connections.gmailConnected && !session.connections.operationalReady) {
+          statusBits.push("Reconecte o Gmail para liberar rascunhos, respostas e operacoes de escrita com confirmacao.");
+        }
+        if (params.get("gmail") === "connected") statusBits.push("Conexao Gmail concluida com sucesso.");
+        if (params.get("error")) statusBits.push(`Erro: ${params.get("error")}`);
+        el("status").textContent = statusBits.join(" ");
+      }
+
+      el("gmailBtn").onclick = () => location.href = "/api/google/gmail/start";
+      el("revokeBtn").onclick = async () => {
+        await api("/api/google/gmail/revoke", { method: "POST", body: "{}" });
+        refresh();
+      };
+      el("calendarBtn").onclick = async () => {
+        try {
+          await api("/api/google/calendar/start");
+        } catch (error) {
+          el("status").textContent = error.message;
+        }
+      };
+      refresh();
+    </script>
+  </body>
+</html>

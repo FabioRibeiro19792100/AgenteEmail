@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Alunos</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <h1>Alunos e convites</h1>
+        <p>Lista centralizada de alunos importados, com links individuais e status do convite.</p>
+      </section>
+      <section class="panel">
+        <div id="students" class="card-list"></div>
+      </section>
+    </main>
+    <script src="/assets/common.js"></script>
+    <script>
+      (async () => {
+        const data = await api("/api/admin/students");
+        el("students").innerHTML = data.students.map((item) => `
+          <div class="card">
+            <div class="row">
+              <div>
+                <strong>${item.nome}</strong><br />
+                <span class="muted">${item.turma_nome}</span>
+              </div>
+              <span class="pill">${item.invite_status}</span>
+            </div>
+            <p>User ID: ${item.user_id}</p>
+            <a href="${item.invite_link}">${item.invite_link}</a>
+          </div>
+        `).join("");
+      })();
+    </script>
+  </body>
+</html>
