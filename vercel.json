@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/healthz",
+      "destination": "/api/healthz"
+    },
+    {
       "source": "/(.*)",
       "destination": "/api/index.cjs"
     }
