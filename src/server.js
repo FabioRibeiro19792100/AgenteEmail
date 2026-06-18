@@ -37,14 +37,16 @@ import {
 import { createSignedState, verifySignedState } from "./security.js";
 
 loadEnv();
+const config = getConfig();
 let configIssues = [];
 try {
   configIssues = validateConfig();
 } catch (error) {
   configIssues = error.message.replace(/^Configuration error:\s*/, "").split("; ");
-  console.error(error.message);
+  if (!config.isProduction) {
+    console.warn(error.message);
+  }
 }
-const config = getConfig();
 
 const publicDir = path.join(process.cwd(), "public");
 
@@ -578,6 +580,8 @@ export async function handler(req, res) {
     });
   }
 }
+
+export default handler;
 
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || "127.0.0.1";
