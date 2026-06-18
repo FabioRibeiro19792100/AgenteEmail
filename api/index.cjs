@@ -1,7 +1,7 @@
 module.exports = async function vercelHandler(request, response) {
   try {
     const { handler } = await import("../src/server.js");
-    return handler(request, response);
+    return await handler(request, response);
   } catch (error) {
     console.error("Vercel boot error", error);
     response.writeHead(500, {
