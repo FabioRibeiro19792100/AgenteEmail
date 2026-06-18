@@ -30,7 +30,7 @@ export function getConfig() {
   };
 }
 
-export function validateConfig() {
+export function getConfigIssues() {
   const { isProduction, appBaseUrl } = getConfig();
   const issues = [];
 
@@ -55,7 +55,13 @@ export function validateConfig() {
     }
   }
 
+  return issues;
+}
+
+export function validateConfig() {
+  const issues = getConfigIssues();
   if (issues.length) {
     throw new Error(`Configuration error: ${issues.join("; ")}`);
   }
+  return issues;
 }

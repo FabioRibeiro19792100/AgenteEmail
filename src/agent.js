@@ -1,4 +1,4 @@
-import { searchEmails } from "./google.js";
+import { readEmail, searchEmails } from "./google.js";
 
 const STOPWORDS = new Set([
   "a", "as", "o", "os", "de", "do", "da", "dos", "das", "e", "em", "na", "no",
@@ -11,13 +11,14 @@ function normalizeQuery(message) {
   const lower = message.toLowerCase();
   if (lower.includes("hoje")) return "newer_than:1d";
   if (lower.includes("ontem")) return "newer_than:2d older_than:1d";
-  if (lower.includes("nao lidos") || lower.includes("não lidos")) return "is:unread newer_than:7d";
+  if (lower.includes("nao lidos") || lower.includes("não lidos")) return "is:unread newer_than:30d";
   if (lower.includes("importantes")) return "is:important newer_than:14d";
   if (lower.includes("pendenc")) return "label:inbox newer_than:14d";
   if (lower.includes("comercial") || lower.includes("venda") || lower.includes("cliente") || lower.includes("negocio") || lower.includes("negócio")) {
-    return "newer_than:30d -from:accounts.google.com -from:google.com -category:social -category:promotions";
+    return "newer_than:90d -from:accounts.google.com -from:google.com -category:social -category:promotions";
   }
-  return "newer_than:7d";
+  if (lower.includes("semana") || lower.includes("7 dias")) return "newer_than:7d";
+  return "newer_than:30d";
 }
 
 function buildQueryPlan(message) {
@@ -25,12 +26,12 @@ function buildQueryPlan(message) {
   const queries = [normalizeQuery(message)];
 
   if (lower.includes("comercial") || lower.includes("cliente") || lower.includes("negocio") || lower.includes("negócio")) {
-    queries.push("newer_than:60d (label:sent OR in:anywhere) -from:accounts.google.com -from:google.com");
-    queries.push("newer_than:30d -category:promotions -category:social");
+    queries.push("newer_than:180d (label:sent OR in:anywhere) -from:accounts.google.com -from:google.com");
+    queries.push("newer_than:365d -category:promotions -category:social");
   }
 
   if (lower.includes("ultim") || lower.includes("ultima") || lower.includes("última")) {
-    queries.push("newer_than:14d");
+    queries.push("newer_than:60d");
   }
 
   return [...new Set(queries)];
@@ -363,6 +364,71 @@ async function prepareWriteAction(userId, userMessage, intent) {
       }
     }
   };
+}
+
+export async function prepareReplyForEmail(userId, messageId, instruction = "") {
+  const target = await readEmail(userId, messageId);
+  const userMessage = instruction || `Responda este email: ${target.subject}`;
+  const generatedContent = await callOpenAI(buildWritePrompt("reply_email", userMessage, target));
+
+  return {
+    answer: `Preparei uma resposta para "${target.subject}". Revise abaixo e confirme antes de enviar.`,
+    toolName: "reply_email",
+    operation: {
+      toolName: "reply_email",
+      permissionLevel: 3,
+      title: "Enviar resposta",
+      summary: `Responder "${target.subject}"`,
+      confirmLabel: "Enviar",
+      editable: true,
+      previewText: generatedContent,
+      payload: {
+        messageId: target.id,
+        threadId: target.threadId,
+        content: generatedContent,
+        to: target.replyToEmail,
+        subject: target.subject.toLowerCase().startsWith("re:")
+          ? target.subject
+          : `Re: ${target.subject}`,
+        references: target.references,
+        inReplyTo: target.messageIdHeader
+      }
+    }
+  };
+}
+
+export async function refineDraftWithAI(draft, action, tone = "") {
+  const directives = {
+    shorten: "Reescreva este rascunho de forma mais curta, clara e objetiva.",
+    translate: "Traduza este rascunho para portugues do Brasil, mantendo tom profissional.",
+    smart_proof: "Revise gramatica, clareza, coesao e tom profissional deste rascunho.",
+    refine_tone: `Reescreva este rascunho no tom ${tone || "profissional"}.`
+  };
+
+  return callOpenAI({
+    model: "gpt-4.1-mini",
+    input: [
+      {
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text:
+              "Voce melhora rascunhos de email. Retorne somente o corpo final do email, sem comentarios extras."
+          }
+        ]
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: `${directives[action] || directives.smart_proof}\n\nRascunho:\n${draft}`
+          }
+        ]
+      }
+    ]
+  });
 }
 
 export async function runAgent(userId, userMessage) {

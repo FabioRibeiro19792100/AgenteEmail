@@ -2,6 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 import {
   acceptInviteAndCreateSession,
   appendAgentLog,
@@ -36,7 +37,13 @@ import {
 import { createSignedState, verifySignedState } from "./security.js";
 
 loadEnv();
-validateConfig();
+let configIssues = [];
+try {
+  configIssues = validateConfig();
+} catch (error) {
+  configIssues = error.message.replace(/^Configuration error:\s*/, "").split("; ");
+  console.error(error.message);
+}
 const config = getConfig();
 
 const publicDir = path.join(process.cwd(), "public");
@@ -282,7 +289,7 @@ async function executePendingAction(user, action, body = {}) {
   }
 }
 
-async function handler(req, res) {
+async function router(req, res) {
   const url = new URL(req.url, requestOrigin(req));
 
   if (req.method === "GET" && url.pathname === "/healthz") {
@@ -290,6 +297,14 @@ async function handler(req, res) {
   }
 
   if (req.method === "GET" && url.pathname === "/readyz") {
+    if (configIssues.length) {
+      return sendJson(res, 503, {
+        ok: false,
+        status: "misconfigured",
+        issues: configIssues,
+        timestamp: nowIso()
+      });
+    }
     const stats = await getReadyStats();
     return sendJson(res, 200, {
       ok: true,
@@ -552,19 +567,36 @@ async function handler(req, res) {
   return sendJson(res, 404, { error: "Rota nao encontrada." });
 }
 
+export async function handler(req, res) {
+  try {
+    return await router(req, res);
+  } catch (error) {
+    console.error(error);
+    return sendJson(res, 500, {
+      error: "Erro interno controlado.",
+      detail: config.isProduction ? undefined : error.message
+    });
+  }
+}
+
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || "127.0.0.1";
 
-const server = http.createServer(handler);
+const currentFile = fileURLToPath(import.meta.url);
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === currentFile;
 
-server.listen(port, host, () => {
-  console.log(`Server running on http://${host}:${port}`);
-});
+if (isDirectRun) {
+  const server = http.createServer(handler);
 
-process.on("SIGTERM", () => {
-  server.close(() => process.exit(0));
-});
+  server.listen(port, host, () => {
+    console.log(`Server running on http://${host}:${port}`);
+  });
 
-process.on("SIGINT", () => {
-  server.close(() => process.exit(0));
-});
+  process.on("SIGTERM", () => {
+    server.close(() => process.exit(0));
+  });
+
+  process.on("SIGINT", () => {
+    server.close(() => process.exit(0));
+  });
+}
