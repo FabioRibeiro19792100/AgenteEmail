@@ -1,4 +1,4 @@
-export default function healthz(request, response) {
+export default function healthz(request: any, response: any) {
   response.writeHead(200, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store"

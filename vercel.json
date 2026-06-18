@@ -6,7 +6,7 @@
     },
     {
       "source": "/(.*)",
-      "destination": "/api/index.cjs"
+      "destination": "/api/index"
     }
   ]
 }
