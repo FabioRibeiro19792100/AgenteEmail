@@ -1,4 +1,4 @@
-export default async function vercelHandler(request, response) {
+module.exports = async function vercelHandler(request, response) {
   try {
     const { handler } = await import("../src/server.js");
     return handler(request, response);
@@ -11,8 +11,8 @@ export default async function vercelHandler(request, response) {
     response.end(
       JSON.stringify({
         error: "Falha ao carregar o backend.",
-        detail: error?.message || "Erro desconhecido no boot da funcao."
+        detail: error && error.message ? error.message : "Erro desconhecido no boot da funcao."
       })
     );
   }
-}
+};
