@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MailFlow Intelligence</title>
-    <link rel="stylesheet" href="/assets/mailflow.css?v=28" />
+    <link rel="stylesheet" href="/assets/mailflow.css?v=29" />
   </head>
   <body>
     <div id="toast" class="mf-toast" hidden></div>
@@ -146,6 +146,13 @@
           </div>
           <div id="quickQuestions" class="mf-chip-row"></div>
         </div>
+
+        <section id="pendingActionsPanel" class="mf-pending-actions" hidden>
+          <div class="mf-pending-head">
+            <span>Ações aguardando confirmação</span>
+          </div>
+          <div id="pendingActionsList" class="mf-pending-list"></div>
+        </section>
 
         <div id="chatMessages" class="mf-chat-messages"></div>
 
@@ -297,6 +304,7 @@
         inbox: [],
         metrics: null,
         latestInsight: null,
+        pendingActions: [],
         chatHistory: [],
         reportSettings: {
           whatsappNumber: "",
@@ -309,7 +317,8 @@
         reportStorageReady: true,
         loadingInbox: false,
         analyzing: false,
-        chatLoading: false
+        chatLoading: false,
+        actionBusy: false
       };
 
       const dayLabels = {
@@ -638,6 +647,8 @@
               ${insights.slice(0, 7).map((item, index) => {
                 const type = item.type || "achado";
                 const confidence = item.confidence ? ` • ${item.confidence}` : "";
+                const source = sourceForInsight(result, item);
+                const messageId = source?.id || "";
                 const evidences = Array.isArray(item.evidenceIndexes) && item.evidenceIndexes.length
                   ? `Evidências: ${item.evidenceIndexes.slice(0, 4).map((evidenceIndex) => `#${evidenceIndex}`).join(", ")}`
                   : "Evidência ranqueada pelo Gmail";
@@ -655,12 +666,51 @@
                       <span>Agente</span>
                       <strong>${escapeHtml(agentOfferForInsight(item))}</strong>
                     </div>
+                    ${messageId ? `
+                      <div class="mf-finding-actions">
+                        <button type="button" data-finding-action="reply" data-message-id="${escapeHtml(messageId)}" data-insight-index="${index}">Preparar resposta</button>
+                        <button type="button" data-finding-action="label" data-message-id="${escapeHtml(messageId)}" data-insight-index="${index}">Aplicar label</button>
+                        <button type="button" data-finding-action="mark-read" data-message-id="${escapeHtml(messageId)}" data-insight-index="${index}">Marcar lido</button>
+                        <button type="button" data-finding-action="archive" data-message-id="${escapeHtml(messageId)}" data-insight-index="${index}">Arquivar</button>
+                      </div>
+                    ` : `
+                      <small class="mf-finding-no-action">Sem email alvo suficiente para executar ação.</small>
+                    `}
                   </article>
                 `;
               }).join("")}
             </div>
           </section>
         `;
+      }
+
+      function sourceForInsight(result, insight) {
+        const sources = Array.isArray(result?.sources) ? result.sources : [];
+        const indexes = Array.isArray(insight?.evidenceIndexes) ? insight.evidenceIndexes : [];
+        const firstIndex = Number(indexes[0]);
+        if (Number.isFinite(firstIndex)) {
+          const source = sources.find((item) => Number(item.index) === firstIndex);
+          if (source) return source;
+        }
+        return sources[0] || null;
+      }
+
+      function labelForInsight(insight) {
+        const type = String(insight?.type || "achado").toLowerCase();
+        const mode = activeMode().name.replace(/\s+/g, " ").trim();
+        if (type.includes("pendencia")) return "MailFlow/Pendências";
+        if (type.includes("risco")) return "MailFlow/Riscos";
+        if (type.includes("oportunidade")) return "MailFlow/Oportunidades";
+        return `MailFlow/${mode}`;
+      }
+
+      function instructionForInsight(insight) {
+        return [
+          "Prepare uma resposta objetiva para este email com base neste achado.",
+          `Achado: ${insight?.title || "sem título"}`,
+          `Leitura do agente: ${insight?.claim || ""}`,
+          insight?.nextAction ? `Próximo passo sugerido: ${insight.nextAction}` : ""
+        ].filter(Boolean).join("\n");
       }
 
       function renderSources(result) {
@@ -749,6 +799,28 @@
         el("chatMessages").scrollTop = el("chatMessages").scrollHeight;
       }
 
+      function renderPendingActions() {
+        const pending = Array.isArray(state.pendingActions) ? state.pendingActions : [];
+        el("pendingActionsPanel").hidden = pending.length === 0;
+        el("pendingActionsList").innerHTML = pending.map((action) => `
+          <article class="mf-pending-card">
+            <div>
+              <strong>${escapeHtml(action.title || "Ação pendente")}</strong>
+              <p>${escapeHtml(action.summary || "")}</p>
+            </div>
+            ${action.editable ? `
+              <textarea data-action-edit="${escapeHtml(action.id)}" rows="5">${escapeHtml(action.previewText || "")}</textarea>
+            ` : `
+              <pre>${escapeHtml(action.previewText || "")}</pre>
+            `}
+            <div class="mf-pending-buttons">
+              <button type="button" class="is-primary" data-action-confirm="${escapeHtml(action.id)}">${escapeHtml(action.confirmLabel || "Confirmar")}</button>
+              <button type="button" data-action-cancel="${escapeHtml(action.id)}">Cancelar</button>
+            </div>
+          </article>
+        `).join("");
+      }
+
       function renderAll() {
         renderModes();
         renderHeader();
@@ -756,6 +828,7 @@
         renderReportSettings();
         renderQuestions();
         renderResult();
+        renderPendingActions();
         renderChat();
       }
 
@@ -778,6 +851,7 @@
           location.href = "/";
           return;
         }
+        state.pendingActions = state.session.pendingActions || [];
         renderAll();
       }
 
@@ -874,6 +948,83 @@
         return `${result.summary || ""}\n\n${first.title || "Insight"}: ${first.claim || ""}\n${agentOfferForInsight(first)}`;
       }
 
+      function rememberPendingAction(action) {
+        if (!action?.id) return;
+        state.pendingActions = [
+          action,
+          ...state.pendingActions.filter((item) => item.id !== action.id)
+        ];
+      }
+
+      async function prepareFindingAction(actionType, messageId, insightIndex) {
+        if (!messageId || state.actionBusy) return;
+        const insight = state.latestInsight?.insights?.[Number(insightIndex)] || {};
+        state.actionBusy = true;
+        renderAll();
+        try {
+          let data;
+          if (actionType === "reply") {
+            data = await api("/api/composer/prepare-reply", {
+              method: "POST",
+              body: JSON.stringify({
+                messageId,
+                instruction: instructionForInsight(insight)
+              })
+            });
+          } else if (actionType === "label") {
+            data = await api("/api/inbox/actions/apply-label", {
+              method: "POST",
+              body: JSON.stringify({
+                messageId,
+                label: labelForInsight(insight)
+              })
+            });
+          } else if (actionType === "mark-read") {
+            data = await api("/api/inbox/actions/mark-read", {
+              method: "POST",
+              body: JSON.stringify({ messageId })
+            });
+          } else if (actionType === "archive") {
+            data = await api("/api/inbox/actions/archive", {
+              method: "POST",
+              body: JSON.stringify({ messageId })
+            });
+          }
+
+          rememberPendingAction(data?.pendingAction);
+          toast(data?.message || data?.answer || "Ação preparada. Confirme antes de executar.");
+        } catch (error) {
+          toast(error.message || "Não foi possível preparar a ação.");
+        } finally {
+          state.actionBusy = false;
+          renderAll();
+        }
+      }
+
+      async function resolvePendingAction(actionId, command) {
+        if (!actionId || state.actionBusy) return;
+        const editNode = Array.from(document.querySelectorAll("[data-action-edit]"))
+          .find((node) => node.dataset.actionEdit === actionId);
+        const editedContent = editNode?.value || "";
+        state.actionBusy = true;
+        renderAll();
+        try {
+          const data = await api(`/api/agent/actions/${encodeURIComponent(actionId)}/${command}`, {
+            method: "POST",
+            body: JSON.stringify({
+              editedContent
+            })
+          });
+          state.pendingActions = state.pendingActions.filter((item) => item.id !== actionId);
+          toast(data?.message || (command === "cancel" ? "Ação cancelada." : "Ação executada."));
+        } catch (error) {
+          toast(error.message || "Não foi possível resolver a ação.");
+        } finally {
+          state.actionBusy = false;
+          renderAll();
+        }
+      }
+
       async function runQuestion(question, options = {}) {
         if (!state.session?.connections?.gmailConnected) {
           toast("Conecte o Gmail para tirar insights reais da caixa.");
@@ -954,6 +1105,28 @@
         input.value = "";
         runQuestion(question, { asChat: true });
       };
+      document.addEventListener("click", (event) => {
+        const findingButton = event.target.closest("[data-finding-action]");
+        if (findingButton) {
+          prepareFindingAction(
+            findingButton.dataset.findingAction,
+            findingButton.dataset.messageId,
+            findingButton.dataset.insightIndex
+          );
+          return;
+        }
+
+        const confirmButton = event.target.closest("[data-action-confirm]");
+        if (confirmButton) {
+          resolvePendingAction(confirmButton.dataset.actionConfirm, "confirm");
+          return;
+        }
+
+        const cancelButton = event.target.closest("[data-action-cancel]");
+        if (cancelButton) {
+          resolvePendingAction(cancelButton.dataset.actionCancel, "cancel");
+        }
+      });
       el("timeframeSelect").onchange = applyFiltersAndLoad;
       el("emailLimitSelect").onchange = applyFiltersAndLoad;
 

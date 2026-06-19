@@ -773,6 +773,20 @@ function markAsReadOperationFromEmail(email) {
   };
 }
 
+function applyLabelOperationFromEmail(email, label) {
+  const cleanLabel = String(label || "").trim() || "MailFlow";
+  return {
+    toolName: "apply_label",
+    permissionLevel: 3,
+    title: "Aplicar label",
+    summary: `Aplicar "${cleanLabel}" em "${email.subject || "mensagem"}"`,
+    confirmLabel: "Aplicar label",
+    editable: true,
+    previewText: cleanLabel,
+    payload: { messageId: email.id, label: cleanLabel }
+  };
+}
+
 async function executePendingAction(user, action, body = {}) {
   const payload = { ...(action.payload || {}) };
   if (action.editable && typeof body.editedContent === "string" && body.editedContent.trim()) {
@@ -1017,6 +1031,27 @@ async function router(req, res) {
       return sendJson(res, 200, {
         ok: true,
         message: "Acao preparada. Confirme para marcar como lido.",
+        pendingAction
+      });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/inbox/actions/apply-label") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    if (!body.messageId) return sendJson(res, 400, { error: "messageId obrigatorio." });
+    try {
+      const email = await readEmail(user.user_id, body.messageId);
+      const pendingAction = await persistPendingAction(
+        user,
+        applyLabelOperationFromEmail(email, body.label || "MailFlow")
+      );
+      return sendJson(res, 200, {
+        ok: true,
+        message: "Acao preparada. Confirme para aplicar a label.",
         pendingAction
       });
     } catch (error) {
