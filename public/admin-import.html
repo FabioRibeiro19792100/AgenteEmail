@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Importar Alunos</title>
-    <link rel="stylesheet" href="/assets/admin.css?v=1" />
+    <title>Cadastrar Turma</title>
+    <link rel="stylesheet" href="/assets/admin.css?v=3" />
   </head>
   <body>
     <div class="admin-root">
@@ -26,8 +26,8 @@
           <a class="is-active" href="/admin/import">
             <b>01</b>
             <span>
-              <strong>Gerar links</strong>
-              <small>Importar alunos</small>
+              <strong>Cadastrar turma</strong>
+              <small>Gerar links</small>
             </span>
           </a>
         </nav>
@@ -40,20 +40,26 @@
       <main class="admin-main">
         <header class="admin-header">
           <div>
-            <span>Importação administrativa</span>
-            <h1>Gerar links</h1>
-            <p>Use uma linha por aluno. Pode ser só nome ou no formato nome, turma, email, papel, instituição. Se a turma não vier, usamos Turma Padrão.</p>
+            <span>Cadastro administrativo</span>
+            <h1>Cadastrar turma</h1>
+            <p>Informe o nome da turma, cole uma linha por aluno e gere os links individuais de acesso.</p>
           </div>
         </header>
 
         <section class="admin-grid">
           <div class="admin-panel">
             <label>
-              <strong>Alunos</strong>
-              <textarea id="raw" rows="10" placeholder="João Silva&#10;Maria Costa, Turma A&#10;Pedro Lima, Turma B, pedro@email.com, monitor, Escola Y"></textarea>
+              <strong>Nome da turma</strong>
+              <input id="turmaName" type="text" placeholder="Ex.: Turma IA - Sexta 9h" autocomplete="off" />
             </label>
+
+            <label>
+              <strong>Alunos</strong>
+              <textarea id="raw" rows="10" placeholder="João Silva&#10;Maria Costa&#10;Pedro Lima"></textarea>
+            </label>
+            <small class="admin-hint">Também aceita: nome, turma, email, papel, instituição. Se a linha tiver turma própria, ela substitui o campo acima.</small>
             <div class="admin-actions">
-              <button id="importBtn" class="admin-button" type="button">Gerar links</button>
+              <button id="importBtn" class="admin-button" type="button">Gerar links da turma</button>
             </div>
             <p id="status" class="admin-status"></p>
           </div>
@@ -80,13 +86,46 @@
           .replaceAll("'", "&#039;");
       }
 
+      function parseStudentLine(line, defaultTurma) {
+        const parts = line.split(",").map((item) => item.trim());
+        if (parts.length === 1) {
+          return {
+            nome: parts[0],
+            turma: defaultTurma,
+            email: "",
+            papel: "",
+            instituicao: ""
+          };
+        }
+        return {
+          nome: parts[0],
+          turma: parts[1] || defaultTurma,
+          email: parts[2] || "",
+          papel: parts[3] || "",
+          instituicao: parts[4] || ""
+        };
+      }
+
       el("importBtn").onclick = async () => {
+        const turma = el("turmaName").value.trim() || "Turma Padrão";
+        const students = el("raw").value
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => parseStudentLine(line, turma))
+          .filter((student) => student.nome);
+
+        if (!students.length) {
+          el("status").textContent = "Cole pelo menos um aluno.";
+          return;
+        }
+
         el("status").textContent = "Gerando links...";
         el("linksPanel").hidden = true;
         try {
           const data = await api("/api/admin/import-students", {
             method: "POST",
-            body: JSON.stringify({ raw: el("raw").value })
+            body: JSON.stringify({ students })
           });
 
           el("result").innerHTML = data.created.map((item) => `

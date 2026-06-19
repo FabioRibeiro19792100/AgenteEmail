@@ -277,6 +277,15 @@ button {
   background: #fff;
 }
 
+.admin-hint {
+  display: block;
+  margin-top: 8px;
+  color: var(--admin-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .admin-actions {
   display: flex;
   flex-wrap: wrap;
