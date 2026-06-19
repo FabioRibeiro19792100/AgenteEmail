@@ -836,6 +836,10 @@ async function router(req, res) {
     return res.end();
   }
 
+  if (req.method === "GET" && url.pathname === "/") {
+    return sendRedirect(res, "/admin/import");
+  }
+
   if (req.method === "GET" && routePage(url.pathname)) {
     if (url.pathname.startsWith("/admin/") && url.pathname !== "/admin/login") {
       if (!(await ensureAdmin(req, res, { redirectTo: url.pathname }))) return;
