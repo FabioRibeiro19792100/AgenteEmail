@@ -1,5 +1,10 @@
 import { readEmail, searchEmails } from "./google.js";
 
+const DEFAULT_INSIGHT_SCAN_RESULTS = 200;
+const MAX_INSIGHT_SCAN_RESULTS = 500;
+const MAX_INSIGHT_EVIDENCE = 80;
+const MAX_INSIGHT_RESULTS_PER_QUERY = 200;
+
 const STOPWORDS = new Set([
   "a", "as", "o", "os", "de", "do", "da", "dos", "das", "e", "em", "na", "no",
   "nas", "nos", "para", "por", "com", "sem", "uma", "um", "me", "minha", "meu",
@@ -328,7 +333,7 @@ function selectRelevantEmails(rankedEmails, analysis) {
   const threshold = analysis.focus === "general" ? 1 : 3;
   const relevant = rankedEmails.filter((email) => email._score >= threshold);
   const fallback = rankedEmails.filter((email) => email._kind !== "automatico");
-  return (relevant.length ? relevant : fallback).slice(0, 10);
+  return (relevant.length ? relevant : fallback).slice(0, 20);
 }
 
 async function searchWithPlan(userId, plan) {
@@ -437,7 +442,7 @@ function hasDateFilter(query = "") {
   return /\b(newer_than|older_than|after|before):/i.test(query);
 }
 
-function buildInsightQueryPlan({ question, timeframe = "30d", query = "", maxResults = 40 }) {
+function buildInsightQueryPlan({ question, timeframe = "30d", query = "", maxResults = DEFAULT_INSIGHT_SCAN_RESULTS }) {
   const baseAnalysis = analyzeRequest(`${question} ${query}`);
   const analysis = {
     ...baseAnalysis,
@@ -478,7 +483,10 @@ function buildInsightQueryPlan({ question, timeframe = "30d", query = "", maxRes
   return {
     analysis,
     queries: queries.slice(0, 10),
-    perQueryLimit: Math.min(24, Math.max(8, Math.ceil(Number(maxResults || 40) / Math.max(queries.length || 1, 1)) + 4))
+    perQueryLimit: Math.min(
+      MAX_INSIGHT_RESULTS_PER_QUERY,
+      Math.max(20, Math.ceil(Number(maxResults || DEFAULT_INSIGHT_SCAN_RESULTS) / Math.max(queries.length || 1, 1)) + 12)
+    )
   };
 }
 
@@ -538,6 +546,7 @@ function buildInsightPrompt({ question, context }) {
                       claim: "O que parece estar acontecendo.",
                       whyItMatters: "Por que isso importa para o usuario.",
                       nextAction: "Proxima acao concreta sugerida.",
+                      agentOffer: "Frase curta em primeira pessoa oferecendo ajuda concreta. Comece com: Quer que eu...",
                       evidenceIndexes: [1],
                       confidence: "alta | media | baixa"
                     }
@@ -584,6 +593,7 @@ function fallbackInsightResponse(question, context, rawText = "") {
       claim: `Evidencia encontrada de ${email.from}.`,
       whyItMatters: (email._reasons || []).join(", ") || "Foi ranqueado como relevante para a pergunta.",
       nextAction: "Abrir a evidencia e pedir uma analise mais especifica ou preparar resposta.",
+      agentOffer: "Quer que eu abra essa evidência e prepare um próximo passo para você?",
       evidenceIndexes: [index + 1],
       confidence: "baixa"
     })),
@@ -674,7 +684,10 @@ export async function runInsightAnalysis(userId, options = {}) {
     throw new Error("Pergunta de insight obrigatoria.");
   }
 
-  const maxResults = Math.min(200, Math.max(10, Number(options.maxResults || 40)));
+  const maxResults = Math.min(
+    MAX_INSIGHT_SCAN_RESULTS,
+    Math.max(10, Number(options.maxResults || DEFAULT_INSIGHT_SCAN_RESULTS))
+  );
   const plan = buildInsightQueryPlan({
     question,
     timeframe: options.timeframe || "30d",
@@ -684,7 +697,7 @@ export async function runInsightAnalysis(userId, options = {}) {
   const collected = await searchWithPlan(userId, plan);
   const ranked = rankEmails(collected.emails, `${question} ${options.query || ""}`, plan.analysis);
   const useful = ranked.filter((email) => email._kind !== "automatico" || plan.analysis.focus === "security");
-  const emails = (useful.length ? useful : ranked).slice(0, Math.min(maxResults, 40));
+  const emails = (useful.length ? useful : ranked).slice(0, Math.min(maxResults, MAX_INSIGHT_EVIDENCE));
   const context = {
     analysis: plan.analysis,
     queryPlan: plan.queries,

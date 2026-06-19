@@ -742,9 +742,9 @@ function inboxQueryFromUrl(url) {
 }
 
 function clampInboxLimit(value) {
-  const parsed = Number(value || 60);
-  if (!Number.isFinite(parsed)) return 60;
-  return Math.min(200, Math.max(1, parsed));
+  const parsed = Number(value || 200);
+  if (!Number.isFinite(parsed)) return 200;
+  return Math.min(500, Math.max(1, parsed));
 }
 
 function archiveOperationFromEmail(email) {

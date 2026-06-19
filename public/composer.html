@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MailFlow Intelligence</title>
-    <link rel="stylesheet" href="/assets/mailflow.css?v=27" />
+    <link rel="stylesheet" href="/assets/mailflow.css?v=28" />
   </head>
   <body>
     <div id="toast" class="mf-toast" hidden></div>
@@ -53,10 +53,10 @@
 
         <div class="mf-sidebar-footer">
           <div class="mf-account">
-            <div id="avatar" class="mf-avatar">F</div>
+            <div id="avatar" class="mf-avatar">V</div>
             <div>
-              <strong id="userName">fabio</strong>
-              <span id="userScope">Turma turma_308dbd48bb8e32c</span>
+              <strong id="userName">Você</strong>
+              <span id="userScope">Gmail não conectado</span>
             </div>
           </div>
 
@@ -89,13 +89,14 @@
               <option value="30d">30 dias</option>
               <option value="60d">60 dias</option>
               <option value="90d">90 dias</option>
+              <option value="180d">180 dias</option>
+              <option value="365d">365 dias</option>
             </select>
             <select id="emailLimitSelect" aria-label="Quantidade de emails">
-              <option value="20">20 emails</option>
-              <option value="40">40 emails</option>
-              <option value="60">60 emails</option>
               <option value="100">100 emails</option>
               <option value="200">200 emails</option>
+              <option value="300">300 emails</option>
+              <option value="500">500 emails</option>
             </select>
             <button id="syncBtn" class="mf-sync-status" type="button">
               <span id="syncIcon" aria-hidden="true"></span>
@@ -291,8 +292,8 @@
       const state = {
         session: null,
         activeModeId: "auditor",
-        timeframe: "30d",
-        emailLimit: 60,
+        timeframe: "90d",
+        emailLimit: 200,
         inbox: [],
         metrics: null,
         latestInsight: null,
@@ -345,6 +346,29 @@
 
       function activeMode() {
         return modes.find((mode) => mode.id === state.activeModeId) || modes.find((mode) => mode.id === "auditor") || modes[0];
+      }
+
+      function identityNameFromEmail(email) {
+        const local = String(email || "").split("@")[0] || "";
+        const readable = local
+          .split(/[._-]+/)
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+          .join(" ");
+        return readable || "Você";
+      }
+
+      function currentMailboxIdentity() {
+        const user = state.session?.user || {};
+        const connections = state.session?.connections || {};
+        const email = connections.googleEmail || "";
+        const name = email ? identityNameFromEmail(email) : user.nome || "Você";
+        return {
+          name,
+          detail: email || (user.turma_id ? `Turma ${user.turma_id}` : "Gmail não conectado"),
+          initial: (name || email || "V").slice(0, 1).toUpperCase()
+        };
       }
 
       function escapeHtml(value) {
@@ -421,7 +445,7 @@
       }
 
       function timeframeText() {
-        return { "30d": "30 dias", "60d": "60 dias", "90d": "90 dias" }[state.timeframe] || state.timeframe;
+        return { "30d": "30 dias", "60d": "60 dias", "90d": "90 dias", "180d": "180 dias", "365d": "365 dias" }[state.timeframe] || state.timeframe;
       }
 
       function reportScheduleText(settings = state.reportSettings) {
@@ -471,8 +495,8 @@
 
       function renderHeader() {
         const mode = activeMode();
-        const user = state.session?.user || {};
         const connections = state.session?.connections || {};
+        const mailboxIdentity = currentMailboxIdentity();
         const email = connections.googleEmail || "Gmail desconectado";
         el("loggedEmail").textContent = email;
         el("activeTitle").textContent = mode.name;
@@ -484,9 +508,9 @@
         el("timeframeSelect").value = state.timeframe;
         el("emailLimitSelect").value = String(state.emailLimit);
         el("connectBtn").querySelector("span:last-child").textContent = connections.gmailConnected ? "Reconectar" : "Conectar";
-        el("userName").textContent = user.nome || "fabio";
-        el("userScope").textContent = user.turma_id ? `Turma ${user.turma_id}` : "Turma turma_308dbd48bb8e32c";
-        el("avatar").textContent = (user.nome || connections.googleEmail || "F").slice(0, 1).toUpperCase();
+        el("userName").textContent = mailboxIdentity.name;
+        el("userScope").textContent = mailboxIdentity.detail;
+        el("avatar").textContent = mailboxIdentity.initial;
         el("syncIcon").innerHTML = state.loadingInbox ? '<span class="mf-spinner"></span>' : icon("refresh");
         el("runIcon").innerHTML = state.analyzing ? '<span class="mf-spinner"></span>' : icon("sparkles");
         el("terminalIcon").innerHTML = icon("terminal");
@@ -519,12 +543,12 @@
           {
             label: "Emails rastreados",
             value: scanned ?? inboxCount,
-            detail: `Janela: ${timeframeText()}`
+            detail: `Até ${state.emailLimit} emails • ${timeframeText()}`
           },
           {
             label: "Emails usados pela IA",
             value: evidences ?? "--",
-            detail: state.latestInsight ? "Busca geral no Gmail" : "Rode uma exploração"
+            detail: state.latestInsight ? "Top evidências ranqueadas" : "Rode uma exploração"
           },
           {
             label: "Achados acionáveis",
@@ -580,19 +604,63 @@
         if (!result) return "";
         const mode = activeMode();
         const lines = [`### ${mode.name}`, result.summary || "Sem conclusão clara."];
-        const insights = Array.isArray(result.insights) ? result.insights : [];
-        if (insights.length) {
-          lines.push("", "### Principais achados");
-          insights.slice(0, 5).forEach((item) => {
-            lines.push(`- **${item.title || "Insight"}:** ${item.claim || ""}`);
-            if (item.nextAction) lines.push(`- Próximo passo: ${item.nextAction}`);
-          });
-        }
         if (Array.isArray(result.blindSpots) && result.blindSpots.length) {
           lines.push("", "### Pontos cegos");
           result.blindSpots.slice(0, 3).forEach((item) => lines.push(`- ${item}`));
         }
         return lines.join("\n");
+      }
+
+      function agentOfferForInsight(item) {
+        const offer = String(item?.agentOffer || "").trim();
+        if (offer) return offer;
+        const nextAction = String(item?.nextAction || "").trim();
+        if (nextAction) return `Quer que eu faça isso para você: ${nextAction}?`;
+
+        const type = String(item?.type || "").toLowerCase();
+        if (type.includes("pendencia")) return "Quer que eu prepare uma resposta ou uma lista de follow-ups para você?";
+        if (type.includes("risco")) return "Quer que eu monte um plano curto para reduzir esse risco?";
+        if (type.includes("oportunidade")) return "Quer que eu prepare uma resposta para aproveitar essa oportunidade?";
+        return "Quer que eu investigue esse achado e proponha o próximo passo?";
+      }
+
+      function renderFindings(result) {
+        const insights = Array.isArray(result?.insights) ? result.insights : [];
+        if (!insights.length) return "";
+
+        return `
+          <section class="mf-findings" aria-label="Principais achados">
+            <div class="mf-findings-head">
+              <span>Principais achados</span>
+              <small>${escapeHtml(insights.length)} oportunidade(s) de ação</small>
+            </div>
+            <div class="mf-finding-list">
+              ${insights.slice(0, 7).map((item, index) => {
+                const type = item.type || "achado";
+                const confidence = item.confidence ? ` • ${item.confidence}` : "";
+                const evidences = Array.isArray(item.evidenceIndexes) && item.evidenceIndexes.length
+                  ? `Evidências: ${item.evidenceIndexes.slice(0, 4).map((evidenceIndex) => `#${evidenceIndex}`).join(", ")}`
+                  : "Evidência ranqueada pelo Gmail";
+                return `
+                  <article class="mf-finding-card">
+                    <div class="mf-finding-meta">
+                      <span>Achado ${index + 1}</span>
+                      <small>${escapeHtml(type)}${escapeHtml(confidence)}</small>
+                    </div>
+                    <h4>${escapeHtml(item.title || "Insight")}</h4>
+                    <p>${escapeHtml(item.claim || "Sem descrição clara para este achado.")}</p>
+                    ${item.whyItMatters ? `<p class="mf-finding-why">${escapeHtml(item.whyItMatters)}</p>` : ""}
+                    <small class="mf-finding-evidence">${escapeHtml(evidences)}</small>
+                    <div class="mf-agent-offer">
+                      <span>Agente</span>
+                      <strong>${escapeHtml(agentOfferForInsight(item))}</strong>
+                    </div>
+                  </article>
+                `;
+              }).join("")}
+            </div>
+          </section>
+        `;
       }
 
       function renderSources(result) {
@@ -647,7 +715,7 @@
           ? `Conclusão • Confiança ${confidence.charAt(0).toUpperCase()}${confidence.slice(1)}`
           : "Conclusão da exploração";
         el("resultPanel").className = "mf-summary-card";
-        el("resultPanel").innerHTML = `${markdownToHtml(insightNarrative(state.latestInsight))}${renderSources(state.latestInsight)}`;
+        el("resultPanel").innerHTML = `${markdownToHtml(insightNarrative(state.latestInsight))}${renderFindings(state.latestInsight)}${renderSources(state.latestInsight)}`;
       }
 
       function renderChat() {
@@ -665,7 +733,7 @@
                 <div class="mf-bubble">
                   <div class="mf-bubble-meta">
                     <span>${isUser ? icon("user") : icon("sparkles")}</span>
-                    <span>${isUser ? "Fábio (Você)" : escapeHtml(activeMode().name)}</span>
+                    <span>${isUser ? "Você" : escapeHtml(activeMode().name)}</span>
                     <time>${escapeHtml(message.time)}</time>
                   </div>
                   <p>${inlineMarkdown(message.text)}</p>
@@ -693,7 +761,7 @@
 
       function readFilters() {
         state.timeframe = el("timeframeSelect").value;
-        state.emailLimit = Number(el("emailLimitSelect").value || 60);
+        state.emailLimit = Number(el("emailLimitSelect").value || 200);
       }
 
       function inboxParams() {
@@ -803,7 +871,7 @@
       function answerText(result) {
         const first = Array.isArray(result?.insights) ? result.insights[0] : null;
         if (!first) return result?.summary || "Não encontrei um insight forte com as evidências atuais.";
-        return `${result.summary || ""}\n\n${first.title || "Insight"}: ${first.claim || ""}${first.nextAction ? `\nPróximo passo: ${first.nextAction}` : ""}`;
+        return `${result.summary || ""}\n\n${first.title || "Insight"}: ${first.claim || ""}\n${agentOfferForInsight(first)}`;
       }
 
       async function runQuestion(question, options = {}) {
