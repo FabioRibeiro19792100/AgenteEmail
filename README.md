@@ -17,8 +17,7 @@ MVP sem dependencias externas, com:
 1. Copie `.env.example` para `.env`
 2. Preencha as credenciais Google e OpenAI
 3. Rode `npm start`
-4. Abra `http://localhost:3000/admin/login`
-5. Em desenvolvimento, se `ADMIN_PASSWORD` nao estiver definido, a senha padrao e `admin`
+4. Abra `http://localhost:3000/admin/import`
 
 ## Observacoes
 
@@ -26,7 +25,7 @@ MVP sem dependencias externas, com:
 - Tokens Google sao armazenados criptografados com AES-256-GCM.
 - O frontend nunca recebe a `OPENAI_API_KEY` nem os tokens Google.
 - Acoes de escrita viram confirmacoes pendentes antes de qualquer execucao.
-- A area `/admin/*` exige sessao administrativa; links de alunos nao liberam importacao/listagem.
+- A area `/admin/import` e a tela inicial para cadastrar turma e gerar links.
 - Calendar ficou preparado, mas bloqueado nesta versao.
 
 ## Supabase
@@ -46,7 +45,6 @@ Variaveis minimas:
 - `SUPABASE_URL`
 - `SUPABASE_SECRET_KEY`
 - `TOKEN_ENCRYPTION_KEY` com segredo forte
-- `ADMIN_PASSWORD` com uma senha forte de pelo menos 12 caracteres para acessar `/admin/login`
 
 ## Producao
 

@@ -13,7 +13,6 @@
         <p>Lista centralizada de alunos importados, com links individuais e status do convite.</p>
         <div class="row">
           <a href="/admin/import"><button class="ghost" type="button">Importar alunos</button></a>
-          <button id="logoutAdminBtn" class="ghost" type="button">Sair do admin</button>
         </div>
       </section>
       <section class="panel">
@@ -42,11 +41,6 @@
           el("students").innerHTML = `<div class="card">${error.message}</div>`;
         }
       })();
-
-      el("logoutAdminBtn").onclick = async () => {
-        await api("/api/admin/logout", { method: "POST" });
-        location.href = "/admin/login";
-      };
     </script>
   </body>
 </html>

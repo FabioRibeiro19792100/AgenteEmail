@@ -841,10 +841,7 @@ async function router(req, res) {
   }
 
   if (req.method === "GET" && routePage(url.pathname)) {
-    if (url.pathname.startsWith("/admin/") && url.pathname !== "/admin/login") {
-      if (!(await ensureAdmin(req, res, { redirectTo: url.pathname }))) return;
-    }
-    if (url.pathname === "/admin/login" && (await isAdminRequest(req))) {
+    if (url.pathname === "/admin/login") {
       return sendRedirect(res, "/admin/import");
     }
     return sendFile(res, path.join(publicDir, routePage(url.pathname)));
@@ -1108,7 +1105,6 @@ async function router(req, res) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/admin/import-students") {
-    if (!(await ensureAdmin(req, res))) return;
     const body = await readBody(req);
     const rows = Array.isArray(body.students) ? body.students : parseImportRows(body.raw || "");
     const createdRows = await importStudents(rows);
@@ -1123,7 +1119,6 @@ async function router(req, res) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/admin/students") {
-    if (!(await ensureAdmin(req, res))) return;
     const students = (await listStudents()).map((item) => ({
       ...item,
       invite_link: item.invite_id ? inviteLink(req, item.invite_id) : ""

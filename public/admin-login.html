@@ -3,48 +3,33 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Acesso Admin</title>
-    <link rel="stylesheet" href="/assets/styles.css" />
+    <meta http-equiv="refresh" content="0; url=/admin/import" />
+    <title>Admin</title>
+    <link rel="stylesheet" href="/assets/admin.css?v=4" />
   </head>
   <body>
-    <main class="shell">
-      <section class="hero">
-        <h1>Acesso administrativo</h1>
-        <p>Area restrita para importar alunos e gerenciar convites individuais.</p>
-      </section>
-      <section class="panel">
-        <label>
-          <strong>Senha de admin</strong>
-          <input id="password" type="password" placeholder="Digite a senha administrativa" autocomplete="current-password" />
-        </label>
-        <div class="row" style="margin-top:16px">
-          <button id="loginBtn" type="button">Entrar no admin</button>
-          <a href="/composer"><button class="ghost" type="button">Ir para cabine</button></a>
+    <div class="admin-root">
+      <aside class="admin-sidebar">
+        <div class="admin-brand">
+          <div class="admin-mark">A</div>
+          <div>
+            <strong>Admin</strong>
+            <span>MailFlow Intelligence</span>
+          </div>
         </div>
-        <p id="status" class="muted"></p>
-      </section>
-    </main>
-    <script src="/assets/common.js"></script>
+      </aside>
+
+      <main class="admin-main">
+        <section class="admin-panel">
+          <span class="admin-redirect-label">Administração</span>
+          <h1 class="admin-redirect-title">Abrindo Cadastrar turma...</h1>
+          <p class="admin-status">Se a página não mudar automaticamente, entre em <a href="/admin/import">/admin/import</a>.</p>
+        </section>
+      </main>
+    </div>
+
     <script>
-      const next = new URLSearchParams(location.search).get("next") || "/admin/import";
-
-      async function login() {
-        el("status").textContent = "Validando acesso...";
-        try {
-          await api("/api/admin/login", {
-            method: "POST",
-            body: JSON.stringify({ password: el("password").value })
-          });
-          location.href = next.startsWith("/admin") ? next : "/admin/import";
-        } catch (error) {
-          el("status").textContent = error.message;
-        }
-      }
-
-      el("loginBtn").onclick = login;
-      el("password").addEventListener("keydown", (event) => {
-        if (event.key === "Enter") login();
-      });
+      location.replace("/admin/import");
     </script>
   </body>
 </html>
