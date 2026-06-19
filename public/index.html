@@ -3,18 +3,33 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Plataforma de Agentes</title>
-    <link rel="stylesheet" href="/assets/styles.css" />
+    <meta http-equiv="refresh" content="0; url=/admin/import" />
+    <title>Admin</title>
+    <link rel="stylesheet" href="/assets/admin.css?v=2" />
   </head>
   <body>
-    <main class="shell">
-      <section class="hero">
-        <h1>Cognitive Inbox</h1>
-        <p>Cabines individuais de agente para usuarios convidados. A area administrativa e restrita.</p>
-        <div class="row">
-          <a href="/composer"><button>Ir para minha cabine</button></a>
+    <div class="admin-root">
+      <aside class="admin-sidebar">
+        <div class="admin-brand">
+          <div class="admin-mark">A</div>
+          <div>
+            <strong>Admin</strong>
+            <span>MailFlow Intelligence</span>
+          </div>
         </div>
-      </section>
-    </main>
+      </aside>
+
+      <main class="admin-main">
+        <section class="admin-panel">
+          <span class="admin-redirect-label">Administração</span>
+          <h1 class="admin-redirect-title">Abrindo Gerar links...</h1>
+          <p class="admin-status">Se a página não mudar automaticamente, entre em <a href="/admin/import">/admin/import</a>.</p>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      location.replace("/admin/import");
+    </script>
   </body>
 </html>
