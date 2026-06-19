@@ -4,40 +4,111 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Importar Alunos</title>
-    <link rel="stylesheet" href="/assets/styles.css" />
+    <link rel="stylesheet" href="/assets/admin.css?v=1" />
   </head>
   <body>
-    <main class="shell">
-      <section class="hero">
-        <h1>Importacao administrativa</h1>
-        <p>Use uma linha por aluno. Pode ser so <strong>nome</strong> ou no formato <strong>nome, turma, email, papel, instituicao</strong>. Se a turma nao vier, usamos <strong>Turma Padrao</strong>.</p>
-      </section>
-      <section class="panel">
-        <textarea id="raw" rows="10" placeholder="Joao Silva&#10;Maria Costa, Turma A&#10;Pedro Lima, Turma B, pedro@email.com, monitor, Escola Y"></textarea>
-        <div class="row" style="margin-top:16px">
-          <button id="importBtn">Importar alunos</button>
-          <a href="/admin/students"><button class="ghost" type="button">Ver alunos</button></a>
+    <div class="admin-root">
+      <aside class="admin-sidebar">
+        <div class="admin-brand">
+          <div class="admin-mark">A</div>
+          <div>
+            <strong>Admin</strong>
+            <span>MailFlow Intelligence</span>
+          </div>
         </div>
-      </section>
-      <section class="panel">
-        <h2>Links gerados</h2>
-        <div id="result" class="card-list"></div>
-      </section>
-    </main>
+
+        <div class="admin-kicker">
+          <span>Administração</span>
+          <p>Convites individuais para alunos.</p>
+        </div>
+
+        <nav class="admin-nav" aria-label="Admin">
+          <a class="is-active" href="/admin/import">
+            <b>01</b>
+            <span>
+              <strong>Gerar links</strong>
+              <small>Importar alunos</small>
+            </span>
+          </a>
+        </nav>
+
+        <div class="admin-sidebar-footer">
+          <button id="logoutAdminBtn" class="admin-button is-ghost" type="button">Sair do admin</button>
+        </div>
+      </aside>
+
+      <main class="admin-main">
+        <header class="admin-header">
+          <div>
+            <span>Importação administrativa</span>
+            <h1>Gerar links</h1>
+            <p>Use uma linha por aluno. Pode ser só nome ou no formato nome, turma, email, papel, instituição. Se a turma não vier, usamos Turma Padrão.</p>
+          </div>
+        </header>
+
+        <section class="admin-grid">
+          <div class="admin-panel">
+            <label>
+              <strong>Alunos</strong>
+              <textarea id="raw" rows="10" placeholder="João Silva&#10;Maria Costa, Turma A&#10;Pedro Lima, Turma B, pedro@email.com, monitor, Escola Y"></textarea>
+            </label>
+            <div class="admin-actions">
+              <button id="importBtn" class="admin-button" type="button">Gerar links</button>
+            </div>
+            <p id="status" class="admin-status"></p>
+          </div>
+
+          <div id="linksPanel" class="admin-panel" hidden>
+            <h2>Links gerados</h2>
+            <div id="result" class="admin-list"></div>
+            <div class="admin-actions">
+              <a class="admin-button is-ghost" href="/admin/students">Ver lista completa</a>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
     <script src="/assets/common.js"></script>
     <script>
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
       el("importBtn").onclick = async () => {
-        const data = await api("/api/admin/import-students", {
-          method: "POST",
-          body: JSON.stringify({ raw: el("raw").value })
-        });
-        el("result").innerHTML = data.created.map((item) => `
-          <div class="card">
-            <strong>${item.nome}</strong><br />
-            <span class="muted">${item.turma}</span><br />
-            <a href="${item.link}">${item.link}</a>
-          </div>
-        `).join("");
+        el("status").textContent = "Gerando links...";
+        el("linksPanel").hidden = true;
+        try {
+          const data = await api("/api/admin/import-students", {
+            method: "POST",
+            body: JSON.stringify({ raw: el("raw").value })
+          });
+
+          el("result").innerHTML = data.created.map((item) => `
+            <article class="admin-card">
+              <strong>${escapeHtml(item.nome)}</strong><br />
+              <small>${escapeHtml(item.turma)}</small><br />
+              <a href="${escapeHtml(item.link)}">${escapeHtml(item.link)}</a>
+            </article>
+          `).join("");
+
+          el("linksPanel").hidden = data.created.length === 0;
+          el("status").textContent = data.created.length
+            ? `${data.created.length} link(s) gerado(s).`
+            : "Nenhum aluno válido encontrado.";
+        } catch (error) {
+          el("status").textContent = error.message;
+        }
+      };
+
+      el("logoutAdminBtn").onclick = async () => {
+        await api("/api/admin/logout", { method: "POST" });
+        location.href = "/admin/login";
       };
     </script>
   </body>

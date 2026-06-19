@@ -3,47 +3,352 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Composer</title>
-    <link rel="stylesheet" href="/assets/styles.css" />
+    <title>MailFlow Intelligence</title>
+    <link rel="stylesheet" href="/assets/mailflow.css?v=27" />
   </head>
-  <body class="composer-body">
-    <main class="composer-page">
-      <header class="composer-header">
-        <div>
-          <h1>Composer</h1>
-          <p id="who" class="muted">Carregando sessao...</p>
-        </div>
-        <div class="header-actions">
-          <span id="connection" class="status-pill">Gmail desconectado</span>
-          <button id="gmailBtn" class="secondary" type="button">Conectar Gmail</button>
-          <button id="clearBtn" class="ghost compact" type="button">Limpar</button>
-          <button id="logoutBtn" class="ghost compact" type="button">Sair</button>
-        </div>
-      </header>
+  <body>
+    <div id="toast" class="mf-toast" hidden></div>
 
-      <section class="chat-workspace">
-        <div id="history" class="chat-stream">
-          <div class="empty-state">
-            <strong>Faça uma pergunta objetiva sobre sua caixa.</strong>
-            <span>Ex.: “quais foram minhas ultimas interacoes comerciais relevantes?”</span>
+    <div class="mf-root">
+      <aside class="mf-sidebar">
+        <div class="mf-brand">
+          <div class="mf-brand-mark">M</div>
+          <div>
+            <h1>MailFlow Intelligence</h1>
+            <p id="loggedEmail">carregando...</p>
           </div>
         </div>
 
-        <div id="pendingActions" class="pending-strip"></div>
+        <div class="mf-section-kicker">
+          <span>Explorações</span>
+          <p>Escolha um modo de investigação.</p>
+        </div>
 
-        <form id="composerForm" class="prompt-bar">
-          <textarea id="message" rows="3" placeholder="Pergunte sobre emails, pendencias, clientes, respostas ou rascunhos..."></textarea>
-          <button id="sendBtn" type="submit">Enviar</button>
+        <nav id="modeList" class="mf-mode-list" aria-label="Explorações de email"></nav>
+
+        <div class="mf-section-kicker mf-report-kicker">
+          <span>REPORT ME</span>
+        </div>
+
+        <section id="weeklyReportBox" class="mf-sidebar-report" aria-label="Relatório semanal por WhatsApp">
+          <span class="mf-wa-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 11.5a8 8 0 0 1-11.8 7L4 20l1.5-4.1A8 8 0 1 1 20 11.5Z"></path>
+              <path d="M9.5 8.5c.3 2.7 2 4.4 4 5l1.2-1.1 1.8.7c-.2 1.2-1 2-2.2 2-3.6 0-6.6-3-6.6-6.6 0-1.2.8-2 2-2.2l.7 1.8-.9.4Z"></path>
+            </svg>
+          </span>
+          <input id="weeklyWhatsapp" type="tel" inputmode="tel" placeholder="+55..." aria-label="WhatsApp" />
+          <select id="weeklyDay" aria-label="Dia da semana">
+            <option value="monday">Seg</option>
+            <option value="tuesday">Ter</option>
+            <option value="wednesday">Qua</option>
+            <option value="thursday">Qui</option>
+            <option value="friday">Sex</option>
+            <option value="saturday">Sáb</option>
+            <option value="sunday">Dom</option>
+          </select>
+          <input id="weeklyTime" type="text" inputmode="numeric" maxlength="5" value="09:00" aria-label="Horário BRT" />
+          <button id="saveReportSettingsBtn" class="mf-sidebar-report-save" type="button" aria-label="Salvar agenda semanal">✓</button>
+        </section>
+
+        <div class="mf-sidebar-footer">
+          <div class="mf-account">
+            <div id="avatar" class="mf-avatar">F</div>
+            <div>
+              <strong id="userName">fabio</strong>
+              <span id="userScope">Turma turma_308dbd48bb8e32c</span>
+            </div>
+          </div>
+
+          <div class="mf-sidebar-actions">
+            <button id="connectBtn" class="mf-connect" type="button">
+              <span aria-hidden="true">✉</span>
+              <span>Conectar</span>
+            </button>
+            <button id="logoutBtn" class="mf-logout" type="button">
+              <span aria-hidden="true">↩</span>
+              <span>Sair</span>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="mf-main">
+        <header class="mf-header">
+          <div class="mf-header-copy">
+            <span class="mf-kicker">Composer Geral</span>
+            <div class="mf-title-line">
+              <h2 id="activeTitle">Auditor Financeiro</h2>
+              <span id="activeIcon" class="mf-active-icon" aria-hidden="true"></span>
+            </div>
+            <p id="activeDescription">Organize boletos, faturas, comprovantes de Pix, cobranças e alertas de assinatura em um painel financeiro nítido.</p>
+          </div>
+
+          <div class="mf-controls" aria-label="Filtros da exploração">
+            <select id="timeframeSelect" aria-label="Janela de tempo">
+              <option value="30d">30 dias</option>
+              <option value="60d">60 dias</option>
+              <option value="90d">90 dias</option>
+            </select>
+            <select id="emailLimitSelect" aria-label="Quantidade de emails">
+              <option value="20">20 emails</option>
+              <option value="40">40 emails</option>
+              <option value="60">60 emails</option>
+              <option value="100">100 emails</option>
+              <option value="200">200 emails</option>
+            </select>
+            <button id="syncBtn" class="mf-sync-status" type="button">
+              <span id="syncIcon" aria-hidden="true"></span>
+              <span id="syncLabel">Gmail sincronizado</span>
+            </button>
+          </div>
+        </header>
+
+        <section id="metricsGrid" class="mf-metrics" aria-label="Dados estatísticos de emails rastreados"></section>
+
+        <section class="mf-workspace">
+          <div class="mf-info-box">
+            <div class="mf-info-head">
+              <span>O que o agente faz</span>
+            </div>
+            <p id="agentDescription">Procura menções de dinheiro, contas, pagamentos, boletos, compras, reembolsos e riscos financeiros.</p>
+          </div>
+
+          <div class="mf-workspace-actions">
+            <button id="runBtn" class="mf-primary mf-run-top" type="button">
+              <span id="runIcon" aria-hidden="true"></span>
+              <span>Rodar esta exploração</span>
+            </button>
+          </div>
+
+          <div class="mf-conclusion">
+            <span id="conclusionLabel" class="mf-conclusion-label">Conclusão da exploração</span>
+            <div id="resultPanel" class="mf-empty">
+              Clique em "Rodar esta exploração" ou em uma pergunta pronta para analisar seus emails reais.
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <aside class="mf-chat mf-right-column">
+        <div class="mf-chat-header">
+          <div class="mf-chat-title">
+            <span id="terminalIcon" aria-hidden="true"></span>
+            <span id="chatTitle">Perguntar sobre os emails</span>
+          </div>
+          <button id="clearChatBtn" class="mf-clear-chat" type="button" hidden>Limpar Conversa</button>
+        </div>
+
+        <div class="mf-chat-prompts">
+          <div class="mf-quick-head">
+            <span>Perguntas Prontas</span>
+          </div>
+          <div id="quickQuestions" class="mf-chip-row"></div>
+        </div>
+
+        <div id="chatMessages" class="mf-chat-messages"></div>
+
+        <form id="chatForm" class="mf-chat-form">
+          <input id="chatInput" type="text" autocomplete="off" placeholder="Pergunte sobre seus emails..." />
+          <button id="sendBtn" class="mf-send" type="submit" aria-label="Enviar pergunta">
+            <span id="sendIcon" aria-hidden="true"></span>
+          </button>
         </form>
-      </section>
-    </main>
+      </aside>
+    </div>
 
     <script src="/assets/common.js"></script>
     <script>
-      let session;
+      const modes = [
+        {
+          id: "detetive",
+          name: "Detetive de Emails",
+          description: "O que está acontecendo?",
+          longDescription: "Descubra fofocas, novidades, tensões, newsletters curiosas ou eventos recentes silenciosos na caixa de entrada.",
+          agentDo: "Procura por mistérios, conversas incomuns, emails frios, fofocas corporativas e pequenas pistas de conflitos ou mudanças.",
+          whyCool: "Alunos viram detetives, muito envolvente.",
+          icon: "search",
+          quickQuestions: [
+            "Quais são as fofocas ou segredos ocultos no meu inbox?",
+            "Tem alguém irritado ou mandando mensagens ambíguas?",
+            "Que newsletters ou spams curiosos recebi recentemente?"
+          ]
+        },
+        {
+          id: "gerente",
+          name: "Gerente de Vida",
+          description: "Relatório semanal",
+          longDescription: "Crie um sumário executivo da sua semana com compromissos, tarefas implícitas e seu balanço de sanidade mental.",
+          agentDo: "Varre prazos, compromissos formais, convites de calendário e extrai tarefas que você prometeu ou precisa realizar.",
+          whyCool: "Mostra utilidade real.",
+          icon: "calendar",
+          quickQuestions: [
+            "Quais compromissos e reuniões tenho marcados?",
+            "Quais tarefas urgentes preciso resolver esta semana?",
+            "Como está meu balanço de sanidade e estresse hoje?"
+          ]
+        },
+        {
+          id: "cacador",
+          name: "Caçador de Oportunidades",
+          description: "Vagas, bolsas e editais",
+          longDescription: "Identifique oportunidades de trabalho, processos seletivos abertos, editais públicos ou parcerias lucrativas.",
+          agentDo: "Filtra chamados de emprego, convites de recrutadores, propostas comerciais de parceiros e links para editais.",
+          whyCool: "Muito motivador pros alunos.",
+          icon: "briefcase",
+          quickQuestions: [
+            "Há alguma proposta de emprego ou convite de entrevista?",
+            "Que oportunidades de projetos ou parcerias comerciais surgiram?",
+            "Quais prazos de inscrição ou editais preciso acompanhar?"
+          ]
+        },
+        {
+          id: "terapeuta",
+          name: "Terapeuta de Inbox",
+          description: "Tom emocional",
+          longDescription: "Avalie a temperatura emocional dos envolvidos nos seus emails e receba conselhos de bem-estar corporativo.",
+          agentDo: "Analisa o sentimento das palavras (urgência, raiva, afeto, cobrança passiva-agressiva) e gera indicadores divertidos.",
+          whyCool: "Diferente e reflexivo.",
+          icon: "heart",
+          quickQuestions: [
+            "Quem está sendo passivo-agressivo comigo hoje?",
+            "Qual é o nível geral de ansiedade dos meus remetentes?",
+            "Dê um conselho de terapeuta para lidar com essa pilha de emails."
+          ]
+        },
+        {
+          id: "organizador",
+          name: "Organizador Automático",
+          description: "Pastas e regras",
+          longDescription: "Receba sugestões inteligentes de marcadores, pastas e regras de triagem automática baseadas no seu dia a dia.",
+          agentDo: "Agrupa remetentes semelhantes por área (finanças, trabalho, lazer, alertas) e projeta regras do tipo \"se... então\".",
+          whyCool: "Prático e poderoso.",
+          icon: "sliders",
+          quickQuestions: [
+            "Quais pastas ou marcadores eu deveria criar no meu Gmail?",
+            "Qual seria a regra de filtro ideal para limpar as newsletters?",
+            "Quais remetentes estão poluindo demais o meu inbox principal?"
+          ]
+        },
+        {
+          id: "promessas",
+          name: "Contador de Promessas",
+          description: "Quem prometeu o quê?",
+          longDescription: "Acompanhe compromissos recíprocos de entrega, pagamentos de dívidas, retornos prometidos ou prazos combinados.",
+          agentDo: "Caça expressões como \"te entrego amanhã\", \"vou transferir\", \"te dou um retorno na segunda\" enviadas por você ou terceiros.",
+          whyCool: "Mostra como as pessoas esquecem.",
+          icon: "check",
+          quickQuestions: [
+            "Quem prometeu me enviar algo e ainda não cumpriu?",
+            "O que eu prometi entregar aos outros de acordo com meu histórico?",
+            "Quais prazos estão prestes a estourar?"
+          ]
+        },
+        {
+          id: "auditor",
+          name: "Auditor Financeiro",
+          description: "Dinheiro e contas",
+          longDescription: "Organize boletos, faturas, comprovantes de Pix, cobranças e alertas de assinatura em um painel financeiro nítido.",
+          agentDo: "Procura menções de dinheiro, contas, pagamentos, boletos, compras, reembolsos e riscos financeiros.",
+          whyCool: "Muito útil pra vida real.",
+          icon: "dollar",
+          quickQuestions: [
+            "Que assuntos financeiros aparecem?",
+            "Existe algum pagamento, boleto ou cobrança importante pendente?",
+            "Que compras ou movimentações financeiras foram detectadas?"
+          ]
+        },
+        {
+          id: "analista",
+          name: "Analista de Rede",
+          description: "Pessoas importantes",
+          longDescription: "Mapeie quem manda mais mensagens, quem exige respostas urgentes e organize seus contatos prioritários.",
+          agentDo: "Mapeia a frequência de correspondência, detecta hierarquias de trabalho reais e gera arquétipos sociais dos remetentes.",
+          whyCool: "Mostra visão de rede social.",
+          icon: "users",
+          quickQuestions: [
+            "Quem são os remetentes mais influentes na minha caixa de entrada?",
+            "Que arquétipo social cada um dos meus contatos principais representa?",
+            "Tem algum email de contato antigo ou importante que deixei de responder?"
+          ]
+        },
+        {
+          id: "previsor",
+          name: "Previsor de Problemas",
+          description: "Riscos futuros",
+          longDescription: "Preveja gargalos, cancelamentos automáticos, esquecimentos ou faturas que vão estourar o limite de gastos.",
+          agentDo: "Interpreta newsletters de reajuste, avisos de expiração de domínio/token, reclamações subliminares e prazos conflitantes.",
+          whyCool: "Demonstra inteligência.",
+          icon: "clock",
+          quickQuestions: [
+            "Quais serviços, assinaturas ou domínios estão prestes a vencer?",
+            "Existe algum sinal de alerta ou projeto prestes a desandar?",
+            "Que potenciais problemas posso evitar agindo agora?"
+          ]
+        }
+      ];
+
+      const state = {
+        session: null,
+        activeModeId: "auditor",
+        timeframe: "30d",
+        emailLimit: 60,
+        inbox: [],
+        metrics: null,
+        latestInsight: null,
+        chatHistory: [],
+        reportSettings: {
+          whatsappNumber: "",
+          scheduleDay: "friday",
+          scheduleTime: "09:00",
+          timezoneLabel: "BRT",
+          enabled: true
+        },
+        reportSaving: false,
+        reportStorageReady: true,
+        loadingInbox: false,
+        analyzing: false,
+        chatLoading: false
+      };
+
+      const dayLabels = {
+        monday: "Segunda-feira",
+        tuesday: "Terça-feira",
+        wednesday: "Quarta-feira",
+        thursday: "Quinta-feira",
+        friday: "Sexta-feira",
+        saturday: "Sábado",
+        sunday: "Domingo"
+      };
+
+      const iconPaths = {
+        search: '<circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path>',
+        calendar: '<rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M8 3v4M16 3v4M4 10h16"></path>',
+        briefcase: '<rect x="3" y="7" width="18" height="13" rx="2"></rect><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18"></path>',
+        heart: '<path d="M20.8 8.6c0 5.1-8.8 10.4-8.8 10.4S3.2 13.7 3.2 8.6A4.7 4.7 0 0 1 12 6.2a4.7 4.7 0 0 1 8.8 2.4Z"></path>',
+        sliders: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M8 15v4"></path>',
+        check: '<rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="m8 12 2.5 2.5L16 9"></path>',
+        dollar: '<path d="M12 2v20M17 6.5c-1.2-1-2.7-1.5-4.5-1.5-2.5 0-4.5 1.2-4.5 3.2 0 4.6 9 2 9 6.7 0 2.2-2 3.6-4.8 3.6-2 0-3.8-.7-5.2-2"></path>',
+        users: '<path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path><circle cx="9.5" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.8M16 3.2a4 4 0 0 1 0 7.6"></path>',
+        clock: '<circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>',
+        refresh: '<path d="M21 12a9 9 0 0 1-15.5 6.2"></path><path d="M3 12A9 9 0 0 1 18.5 5.8"></path><path d="M3 18v-5h5M21 6v5h-5"></path>',
+        sparkles: '<path d="M12 3 13.7 8.3 19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3Z"></path><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z"></path>',
+        terminal: '<path d="m4 7 5 5-5 5"></path><path d="M12 19h8"></path>',
+        help: '<circle cx="12" cy="12" r="9"></circle><path d="M9.6 9a2.6 2.6 0 1 1 4.6 1.6c-.9.8-1.7 1.2-1.7 2.4"></path><path d="M12 17h.01"></path>',
+        send: '<path d="m22 2-7 20-4-9-9-4 20-7Z"></path><path d="M22 2 11 13"></path>',
+        user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>'
+      };
+
+      function icon(name) {
+        return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconPaths[name] || iconPaths.search}</svg>`;
+      }
+
+      function activeMode() {
+        return modes.find((mode) => mode.id === state.activeModeId) || modes.find((mode) => mode.id === "auditor") || modes[0];
+      }
 
       function escapeHtml(value) {
-        return String(value || "")
+        return String(value ?? "")
           .replaceAll("&", "&amp;")
           .replaceAll("<", "&lt;")
           .replaceAll(">", "&gt;")
@@ -51,176 +356,540 @@
           .replaceAll("'", "&#039;");
       }
 
+      function inlineMarkdown(value) {
+        return escapeHtml(value)
+          .replace(/`([^`]+)`/g, "<code>$1</code>")
+          .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+      }
+
+      function markdownToHtml(text) {
+        const lines = String(text || "").split("\n");
+        let html = "";
+        let list = null;
+
+        function closeList() {
+          if (list) {
+            html += `</${list}>`;
+            list = null;
+          }
+        }
+
+        lines.forEach((line) => {
+          const trimmed = line.trim();
+          if (!trimmed) {
+            closeList();
+            return;
+          }
+          if (trimmed.startsWith("### ")) {
+            closeList();
+            html += `<h3>${inlineMarkdown(trimmed.slice(4))}</h3>`;
+            return;
+          }
+          if (trimmed.startsWith("## ")) {
+            closeList();
+            html += `<h2>${inlineMarkdown(trimmed.slice(3))}</h2>`;
+            return;
+          }
+          if (trimmed.startsWith("# ")) {
+            closeList();
+            html += `<h1>${inlineMarkdown(trimmed.slice(2))}</h1>`;
+            return;
+          }
+          if (/^[-*]\s+/.test(trimmed)) {
+            if (list !== "ul") {
+              closeList();
+              list = "ul";
+              html += "<ul>";
+            }
+            html += `<li>${inlineMarkdown(trimmed.replace(/^[-*]\s+/, ""))}</li>`;
+            return;
+          }
+          if (/^\d+\.\s+/.test(trimmed)) {
+            if (list !== "ol") {
+              closeList();
+              list = "ol";
+              html += "<ol>";
+            }
+            html += `<li>${inlineMarkdown(trimmed.replace(/^\d+\.\s+/, ""))}</li>`;
+            return;
+          }
+          closeList();
+          html += `<p>${inlineMarkdown(trimmed)}</p>`;
+        });
+        closeList();
+        return html;
+      }
+
+      function timeframeText() {
+        return { "30d": "30 dias", "60d": "60 dias", "90d": "90 dias" }[state.timeframe] || state.timeframe;
+      }
+
+      function reportScheduleText(settings = state.reportSettings) {
+        const day = dayLabels[settings.scheduleDay] || dayLabels.friday;
+        const time = settings.scheduleTime || "09:00";
+        return `${day} às ${time} ${settings.timezoneLabel || "BRT"}.`;
+      }
+
+      function toast(message) {
+        const node = el("toast");
+        node.textContent = message;
+        node.hidden = false;
+        clearTimeout(toast.timer);
+        toast.timer = setTimeout(() => {
+          node.hidden = true;
+        }, 3200);
+      }
+
+      function renderModes() {
+        el("modeList").innerHTML = modes
+          .map((mode, index) => {
+            const active = mode.id === state.activeModeId;
+            return `
+              <button class="mf-mode-button ${active ? "is-active" : ""}" type="button" data-mode="${mode.id}">
+                <span class="mf-mode-index">${String(index + 1).padStart(2, "0")}</span>
+                <span class="mf-mode-text">
+                  <span class="mf-mode-title">
+                    ${escapeHtml(mode.name)}
+                    <span class="mf-mode-icon">${icon(mode.icon)}</span>
+                  </span>
+                  <span class="mf-mode-description">${escapeHtml(mode.description)}</span>
+                </span>
+              </button>
+            `;
+          })
+          .join("");
+
+        document.querySelectorAll("[data-mode]").forEach((button) => {
+          button.onclick = () => {
+            state.activeModeId = button.dataset.mode;
+            state.latestInsight = null;
+            state.chatHistory = [];
+            renderAll();
+          };
+        });
+      }
+
+      function renderHeader() {
+        const mode = activeMode();
+        const user = state.session?.user || {};
+        const connections = state.session?.connections || {};
+        const email = connections.googleEmail || "Gmail desconectado";
+        el("loggedEmail").textContent = email;
+        el("activeTitle").textContent = mode.name;
+        el("activeIcon").innerHTML = icon(mode.icon);
+        el("activeDescription").textContent = mode.longDescription;
+        el("agentDescription").textContent = mode.agentDo;
+        el("chatTitle").textContent = "Perguntar sobre os emails";
+        el("chatInput").placeholder = `Pergunte ao ${mode.name} sobre seus emails...`;
+        el("timeframeSelect").value = state.timeframe;
+        el("emailLimitSelect").value = String(state.emailLimit);
+        el("connectBtn").querySelector("span:last-child").textContent = connections.gmailConnected ? "Reconectar" : "Conectar";
+        el("userName").textContent = user.nome || "fabio";
+        el("userScope").textContent = user.turma_id ? `Turma ${user.turma_id}` : "Turma turma_308dbd48bb8e32c";
+        el("avatar").textContent = (user.nome || connections.googleEmail || "F").slice(0, 1).toUpperCase();
+        el("syncIcon").innerHTML = state.loadingInbox ? '<span class="mf-spinner"></span>' : icon("refresh");
+        el("runIcon").innerHTML = state.analyzing ? '<span class="mf-spinner"></span>' : icon("sparkles");
+        el("terminalIcon").innerHTML = icon("terminal");
+        el("sendIcon").innerHTML = state.chatLoading ? '<span class="mf-spinner"></span>' : icon("send");
+        el("syncLabel").textContent = state.loadingInbox
+          ? "Sincronizando..."
+          : connections.gmailConnected
+            ? "Gmail sincronizado"
+            : "Gmail desconectado";
+        el("syncBtn").disabled = state.loadingInbox;
+        el("runBtn").disabled = state.analyzing;
+        el("sendBtn").disabled = state.chatLoading;
+      }
+
+      function countPendingInsights() {
+        if (!state.latestInsight) return null;
+        const insights = Array.isArray(state.latestInsight.insights) ? state.latestInsight.insights : [];
+        return insights.filter((item) =>
+          ["pendencia", "risco", "oportunidade"].includes(String(item.type || "").toLowerCase())
+        ).length;
+      }
+
+      function renderMetrics() {
+        const connections = state.session?.connections || {};
+        const scanned = state.latestInsight?.coverage?.scanned;
+        const evidences = state.latestInsight?.coverage?.evidenceCount ?? state.latestInsight?.sources?.length;
+        const pending = countPendingInsights();
+        const inboxCount = state.loadingInbox ? "..." : state.inbox.length;
+        const cards = [
+          {
+            label: "Emails rastreados",
+            value: scanned ?? inboxCount,
+            detail: `Janela: ${timeframeText()}`
+          },
+          {
+            label: "Emails usados pela IA",
+            value: evidences ?? "--",
+            detail: state.latestInsight ? "Busca geral no Gmail" : "Rode uma exploração"
+          },
+          {
+            label: "Achados acionáveis",
+            value: pending ?? "--",
+            detail: state.latestInsight ? "Pendências, riscos ou oportunidades" : "Rode uma exploração"
+          },
+          {
+            label: "Gmail",
+            value: connections.gmailConnected ? "Conectado" : "Simulação",
+            detail: connections.googleEmail || "Conecte uma conta"
+          }
+        ];
+
+        el("metricsGrid").innerHTML = cards
+          .map((card) => `
+            <article class="mf-metric-card">
+              <span>${escapeHtml(card.label)}</span>
+              <strong class="${card.label === "Gmail" ? "mf-status" : ""}">${escapeHtml(card.value)}</strong>
+              <small class="${card.label === "Gmail" ? "mf-metric-email" : ""}">${escapeHtml(card.detail)}</small>
+            </article>
+          `)
+          .join("");
+      }
+
+      function setFieldValue(id, value) {
+        const node = el(id);
+        if (document.activeElement !== node) node.value = value;
+      }
+
+      function renderReportSettings() {
+        const settings = state.reportSettings;
+        setFieldValue("weeklyWhatsapp", settings.whatsappNumber || "");
+        setFieldValue("weeklyDay", settings.scheduleDay || "friday");
+        setFieldValue("weeklyTime", settings.scheduleTime || "09:00");
+        el("saveReportSettingsBtn").disabled = state.reportSaving;
+        el("saveReportSettingsBtn").textContent = state.reportSaving ? "..." : "✓";
+        el("weeklyReportBox").title = state.reportStorageReady
+          ? `Relatório com as 9 conclusões: ${reportScheduleText(settings)}`
+          : "Para salvar, rode o schema atualizado no Supabase.";
+      }
+
+      function renderQuestions() {
+        el("quickQuestions").innerHTML = activeMode().quickQuestions
+          .map((question) => `<button class="mf-chip" type="button" data-question="${escapeHtml(question)}">${escapeHtml(question)}</button>`)
+          .join("");
+
+        document.querySelectorAll("[data-question]").forEach((button) => {
+          button.onclick = () => runQuestion(button.dataset.question || "", { asChat: true });
+        });
+      }
+
+      function insightNarrative(result) {
+        if (!result) return "";
+        const mode = activeMode();
+        const lines = [`### ${mode.name}`, result.summary || "Sem conclusão clara."];
+        const insights = Array.isArray(result.insights) ? result.insights : [];
+        if (insights.length) {
+          lines.push("", "### Principais achados");
+          insights.slice(0, 5).forEach((item) => {
+            lines.push(`- **${item.title || "Insight"}:** ${item.claim || ""}`);
+            if (item.nextAction) lines.push(`- Próximo passo: ${item.nextAction}`);
+          });
+        }
+        if (Array.isArray(result.blindSpots) && result.blindSpots.length) {
+          lines.push("", "### Pontos cegos");
+          result.blindSpots.slice(0, 3).forEach((item) => lines.push(`- ${item}`));
+        }
+        return lines.join("\n");
+      }
+
+      function renderSources(result) {
+        const sources = Array.isArray(result?.sources) ? result.sources : [];
+        if (!sources.length) return "";
+        return `
+          <section class="mf-sources" aria-label="Evidências usadas pela IA">
+            <div class="mf-sources-head">
+              <span>Evidências usadas</span>
+              <small>${escapeHtml(sources.length)} emails analisados neste resultado</small>
+            </div>
+            <div class="mf-source-list">
+              ${sources.map((source) => `
+                <article class="mf-email-evidence">
+                  <header>
+                    <div>
+                      <span class="mf-email-from">${escapeHtml(source.from || "Remetente desconhecido")}</span>
+                      <small>#${escapeHtml(source.index)} · ${escapeHtml(source.kind || "email")} · score ${escapeHtml(source.score ?? "-")}</small>
+                    </div>
+                    <time>${escapeHtml(source.date || "")}</time>
+                  </header>
+                  <strong>${escapeHtml(source.subject || "Sem assunto")}</strong>
+                  <p>${escapeHtml(source.snippet || "Sem prévia disponível.")}</p>
+                </article>
+              `).join("")}
+            </div>
+          </section>
+        `;
+      }
+
+      function renderResult() {
+        if (state.analyzing) {
+          el("conclusionLabel").textContent = "Analisando evidências";
+          el("resultPanel").className = "mf-loading";
+          el("resultPanel").innerHTML = `
+            <span class="mf-spinner"></span>
+            <strong>Sintonizando canais mentais...</strong>
+            <span>Lendo emails rastreados, separando evidências e gerando conclusões.</span>
+          `;
+          return;
+        }
+
+        if (!state.latestInsight) {
+          el("conclusionLabel").textContent = "Conclusão da exploração";
+          el("resultPanel").className = "mf-empty";
+          el("resultPanel").textContent = 'Clique em "Rodar esta exploração" ou em uma pergunta pronta para analisar seus emails reais.';
+          return;
+        }
+
+        const confidence = String(state.latestInsight.confidence || "").trim();
+        el("conclusionLabel").textContent = confidence
+          ? `Conclusão • Confiança ${confidence.charAt(0).toUpperCase()}${confidence.slice(1)}`
+          : "Conclusão da exploração";
+        el("resultPanel").className = "mf-summary-card";
+        el("resultPanel").innerHTML = `${markdownToHtml(insightNarrative(state.latestInsight))}${renderSources(state.latestInsight)}`;
+      }
+
+      function renderChat() {
+        el("clearChatBtn").hidden = state.chatHistory.length === 0;
+        if (!state.chatHistory.length && !state.chatLoading) {
+          el("chatMessages").innerHTML = "";
+          return;
+        }
+
+        const messages = state.chatHistory
+          .map((message) => {
+            const isUser = message.sender === "user";
+            return `
+              <div class="mf-message ${isUser ? "is-user" : "is-agent"}">
+                <div class="mf-bubble">
+                  <div class="mf-bubble-meta">
+                    <span>${isUser ? icon("user") : icon("sparkles")}</span>
+                    <span>${isUser ? "Fábio (Você)" : escapeHtml(activeMode().name)}</span>
+                    <time>${escapeHtml(message.time)}</time>
+                  </div>
+                  <p>${inlineMarkdown(message.text)}</p>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+
+        el("chatMessages").innerHTML = messages + (state.chatLoading
+          ? `<div class="mf-message is-agent"><div class="mf-bubble"><div class="mf-bubble-meta"><span>${icon("sparkles")}</span><span>${escapeHtml(activeMode().name)}</span></div><p>Digitando parecer circunstancial...</p></div></div>`
+          : "");
+        el("chatMessages").scrollTop = el("chatMessages").scrollHeight;
+      }
+
+      function renderAll() {
+        renderModes();
+        renderHeader();
+        renderMetrics();
+        renderReportSettings();
+        renderQuestions();
+        renderResult();
+        renderChat();
+      }
+
+      function readFilters() {
+        state.timeframe = el("timeframeSelect").value;
+        state.emailLimit = Number(el("emailLimitSelect").value || 60);
+      }
+
+      function inboxParams() {
+        const params = new URLSearchParams({
+          timeframe: state.timeframe,
+          max: String(state.emailLimit)
+        });
+        return params.toString();
+      }
+
       async function loadSession() {
-        session = await api("/api/session");
-        if (!session.authenticated) {
+        state.session = await api("/api/session");
+        if (!state.session.authenticated) {
           location.href = "/";
           return;
         }
-
-        el("who").textContent = `${session.user.nome} · cabine individual`;
-        el("connection").textContent = session.connections.gmailConnected
-          ? `Gmail: ${session.connections.googleEmail}`
-          : "Gmail desconectado";
-        el("connection").className = session.connections.gmailConnected
-          ? "status-pill connected"
-          : "status-pill";
-
-        renderPendingActions(session.pendingActions || []);
+        renderAll();
       }
 
-      function ensureHistoryReady() {
-        const empty = document.querySelector(".empty-state");
-        if (empty) empty.remove();
+      async function loadReportSettings() {
+        try {
+          const data = await api("/api/weekly-report/settings");
+          state.reportSettings = {
+            ...state.reportSettings,
+            ...(data.settings || {})
+          };
+          state.reportStorageReady = data.storageReady !== false;
+        } catch {
+          state.reportStorageReady = false;
+        }
+        renderAll();
       }
 
-      function sourceMarkup(sources = [], queryPlan = []) {
-        if (!sources.length && !queryPlan.length) return "";
-        const sourceItems = sources.map((source) => `
-          <div class="source-row">
-            <span>${escapeHtml(source.kind || "fonte")}</span>
-            <strong>${escapeHtml(source.subject)}</strong>
-            <small>${escapeHtml(source.from)} · ${escapeHtml(source.date)}</small>
-          </div>
-        `).join("");
-
-        const queryItems = queryPlan.map((query) => `<code>${escapeHtml(query)}</code>`).join("");
-
-        return `
-          <details class="turn-evidence">
-            <summary>Fontes e busca deste turno</summary>
-            ${sourceItems || `<span class="muted">Nenhuma fonte relevante encontrada.</span>`}
-            ${queryItems ? `<div class="query-list">${queryItems}</div>` : ""}
-          </details>
-        `;
+      function readReportSettingsForm() {
+        return {
+          whatsappNumber: el("weeklyWhatsapp").value.trim(),
+          scheduleDay: el("weeklyDay").value || "friday",
+          scheduleTime: el("weeklyTime").value || "09:00",
+          timezoneLabel: "BRT",
+          enabled: true
+        };
       }
 
-      function addTurn(question, answer, sources = [], queryPlan = []) {
-        ensureHistoryReady();
-        const wrapper = document.createElement("article");
-        wrapper.className = "chat-turn";
-        wrapper.innerHTML = `
-          <div class="message user-message">${escapeHtml(question)}</div>
-          <div class="message assistant-message">
-            <div>${escapeHtml(answer)}</div>
-            ${sourceMarkup(sources, queryPlan)}
-          </div>
-        `;
-        el("history").append(wrapper);
-        el("history").scrollTop = el("history").scrollHeight;
-      }
-
-      function addSystemMessage(text) {
-        ensureHistoryReady();
-        const div = document.createElement("div");
-        div.className = "message system-message";
-        div.textContent = text;
-        el("history").append(div);
-        el("history").scrollTop = el("history").scrollHeight;
-      }
-
-      function renderPendingActions(actions) {
-        if (!actions.length) {
-          el("pendingActions").innerHTML = "";
+      async function saveReportSettings() {
+        const settings = readReportSettingsForm();
+        if (settings.whatsappNumber && settings.whatsappNumber.replace(/\D/g, "").length < 10) {
+          toast("Informe um WhatsApp com DDI e DDD.");
           return;
         }
 
-        el("pendingActions").innerHTML = actions.map((action) => `
-          <div class="pending-action" data-action-id="${escapeHtml(action.id)}">
-            <div>
-              <strong>${escapeHtml(action.title)}</strong>
-              <span>${escapeHtml(action.summary)}</span>
-            </div>
-            ${action.editable ? `<textarea data-editor rows="4">${escapeHtml(action.previewText)}</textarea>` : `<p>${escapeHtml(action.previewText)}</p>`}
-            <div class="pending-buttons">
-              <button data-confirm type="button">${escapeHtml(action.confirmLabel)}</button>
-              <button data-cancel class="ghost compact" type="button">Cancelar</button>
-            </div>
-          </div>
-        `).join("");
+        state.reportSettings = { ...state.reportSettings, ...settings };
+        state.reportSaving = true;
+        renderAll();
+        try {
+          const data = await api("/api/weekly-report/settings", {
+            method: "POST",
+            body: JSON.stringify(settings)
+          });
+          state.reportSettings = { ...state.reportSettings, ...(data.settings || {}) };
+          state.reportStorageReady = data.storageReady !== false;
+          toast("Agenda semanal salva.");
+        } catch (error) {
+          toast(error.message || "Não foi possível salvar a agenda.");
+        } finally {
+          state.reportSaving = false;
+          renderAll();
+        }
+      }
 
-        document.querySelectorAll("[data-confirm]").forEach((button) => {
-          button.onclick = async () => {
-            const card = button.closest("[data-action-id]");
-            const editor = card.querySelector("[data-editor]");
-            try {
-              const data = await api(`/api/agent/actions/${card.dataset.actionId}/confirm`, {
-                method: "POST",
-                body: JSON.stringify({ editedContent: editor ? editor.value : "" })
-              });
-              addSystemMessage(data.message);
-              await loadSession();
-            } catch (error) {
-              addSystemMessage(error.message);
-            }
-          };
-        });
+      async function loadInbox() {
+        if (!state.session?.connections?.gmailConnected) {
+          state.inbox = [];
+          state.metrics = null;
+          renderAll();
+          return;
+        }
 
-        document.querySelectorAll("[data-cancel]").forEach((button) => {
-          button.onclick = async () => {
-            const card = button.closest("[data-action-id]");
-            try {
-              await api(`/api/agent/actions/${card.dataset.actionId}/cancel`, {
-                method: "POST",
-                body: "{}"
-              });
-              addSystemMessage("Acao cancelada.");
-              await loadSession();
-            } catch (error) {
-              addSystemMessage(error.message);
-            }
-          };
+        state.loadingInbox = true;
+        renderAll();
+        try {
+          const data = await api(`/api/inbox/recent?${inboxParams()}`);
+          state.inbox = data.emails || [];
+          state.metrics = data.metrics || null;
+        } catch (error) {
+          state.inbox = [];
+          state.metrics = null;
+          toast(error.message || "Não foi possível ler o Gmail.");
+        } finally {
+          state.loadingInbox = false;
+          renderAll();
+        }
+      }
+
+      function chatTime() {
+        return new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      }
+
+      function addMessage(sender, text) {
+        state.chatHistory.push({
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          sender,
+          text,
+          time: chatTime()
         });
       }
 
-      el("composerForm").onsubmit = async (event) => {
-        event.preventDefault();
-        const question = el("message").value.trim();
-        if (!question) return;
+      function answerText(result) {
+        const first = Array.isArray(result?.insights) ? result.insights[0] : null;
+        if (!first) return result?.summary || "Não encontrei um insight forte com as evidências atuais.";
+        return `${result.summary || ""}\n\n${first.title || "Insight"}: ${first.claim || ""}${first.nextAction ? `\nPróximo passo: ${first.nextAction}` : ""}`;
+      }
 
-        el("sendBtn").disabled = true;
-        el("sendBtn").textContent = "Analisando";
+      async function runQuestion(question, options = {}) {
+        if (!state.session?.connections?.gmailConnected) {
+          toast("Conecte o Gmail para tirar insights reais da caixa.");
+          return;
+        }
+
+        const mode = activeMode();
+        const cleanQuestion = String(question || mode.quickQuestions[0] || mode.agentDo).trim();
+        if (!cleanQuestion) return;
+
+        if (options.asChat) addMessage("user", cleanQuestion);
+        state.analyzing = true;
+        state.chatLoading = Boolean(options.asChat);
+        renderAll();
+
         try {
-          const data = await api("/api/agent/message", {
+          const data = await api("/api/insights/analyze", {
             method: "POST",
-            body: JSON.stringify({ message: question })
+            body: JSON.stringify({
+              question: `${mode.agentDo}\n\nPergunta específica: ${cleanQuestion}`,
+              timeframe: state.timeframe,
+              query: "",
+              maxResults: state.emailLimit
+            })
           });
-          addTurn(question, data.answer, data.sources || [], data.queryPlan || []);
-          el("message").value = "";
-          if (data.pendingAction) await loadSession();
+          state.latestInsight = data.insight;
+          if (options.asChat) addMessage("agent", answerText(data.insight));
+          toast("Exploração concluída.");
         } catch (error) {
-          addSystemMessage(error.message);
+          if (options.asChat) addMessage("agent", error.message || "Não consegui processar essa pergunta agora.");
+          toast(error.message || "Falha ao analisar emails.");
         } finally {
-          el("sendBtn").disabled = false;
-          el("sendBtn").textContent = "Enviar";
+          state.analyzing = false;
+          state.chatLoading = false;
+          renderAll();
         }
-      };
+      }
 
-      el("message").addEventListener("keydown", (event) => {
-        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-          el("composerForm").requestSubmit();
-        }
-      });
+      async function applyFiltersAndLoad() {
+        readFilters();
+        state.latestInsight = null;
+        await loadInbox();
+      }
 
-      el("clearBtn").onclick = () => {
-        el("history").innerHTML = `
-          <div class="empty-state">
-            <strong>Faça uma pergunta objetiva sobre sua caixa.</strong>
-            <span>Ex.: “quais foram minhas ultimas interacoes comerciais relevantes?”</span>
-          </div>
-        `;
-      };
+      async function syncGmailNow() {
+        readFilters();
+        state.latestInsight = null;
+        await loadInbox();
+        toast("Gmail sincronizado com os filtros atuais.");
+      }
 
-      el("gmailBtn").onclick = () => {
+      async function boot() {
+        renderAll();
+        await loadSession();
+        await loadReportSettings();
+        await loadInbox();
+      }
+
+      el("syncBtn").onclick = syncGmailNow;
+      el("runBtn").onclick = () => runQuestion(activeMode().quickQuestions[0], { asChat: false });
+      el("saveReportSettingsBtn").onclick = saveReportSettings;
+      el("connectBtn").onclick = () => {
         location.href = "/api/google/gmail/start";
       };
-
       el("logoutBtn").onclick = async () => {
         await api("/api/logout", { method: "POST", body: "{}" });
         location.href = "/";
       };
+      el("clearChatBtn").onclick = () => {
+        state.chatHistory = [];
+        renderAll();
+      };
+      el("chatForm").onsubmit = (event) => {
+        event.preventDefault();
+        const input = el("chatInput");
+        const question = input.value.trim();
+        if (!question) return;
+        input.value = "";
+        runQuestion(question, { asChat: true });
+      };
+      el("timeframeSelect").onchange = applyFiltersAndLoad;
+      el("emailLimitSelect").onchange = applyFiltersAndLoad;
 
-      loadSession();
+      boot();
     </script>
   </body>
 </html>

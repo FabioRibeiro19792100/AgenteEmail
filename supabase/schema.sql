@@ -82,3 +82,15 @@ create table if not exists pending_actions (
   error_message text,
   execution_result jsonb
 );
+
+create table if not exists weekly_report_settings (
+  user_id text primary key references users(user_id) on delete cascade,
+  whatsapp_number text not null default '',
+  schedule_day text not null default 'friday',
+  schedule_time text not null default '09:00',
+  timezone text not null default 'America/Sao_Paulo',
+  timezone_label text not null default 'BRT',
+  enabled boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);

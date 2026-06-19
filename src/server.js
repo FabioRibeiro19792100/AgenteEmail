@@ -9,18 +9,21 @@ import {
   consumeOAuthState,
   createOAuthState,
   createPendingAction,
+  defaultWeeklyReportSettings,
   generateId,
   getPendingActionByIdForUser,
   getReadyStats,
   getSessionById,
   getUserById,
+  getWeeklyReportSettings,
   importStudents,
   listPendingActionsForUser,
   listStudents,
   nowIso,
-  updatePendingAction
+  updatePendingAction,
+  upsertWeeklyReportSettings
 } from "./db.js";
-import { runAgent } from "./agent.js";
+import { prepareReplyForEmail, refineDraftWithAI, runAgent, runInsightAnalysis } from "./agent.js";
 import { getConfig, loadEnv, validateConfig } from "./config.js";
 import {
   applyLabel,
@@ -29,6 +32,8 @@ import {
   createDraft,
   getGmailConnectionStatus,
   markAsRead,
+  readEmail,
+  searchEmails,
   replyEmail,
   revokeGmailConnection,
   saveGmailConnection,
@@ -107,11 +112,13 @@ function setCookie(res, name, value) {
 }
 
 function clearCookie(res, name) {
-  res.setHeader("Set-Cookie", `${name}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`);
+  const secure = config.isProduction ? "; Secure" : "";
+  res.setHeader("Set-Cookie", `${name}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax${secure}`);
 }
 
 async function getSessionUser(req) {
   const cookies = parseCookies(req);
+  if (!cookies.session_id) return null;
   const session = await getSessionById(cookies.session_id);
   if (!session) return null;
   return getUserById(session.user_id);
@@ -146,6 +153,68 @@ async function ensureAuth(req, res) {
     return null;
   }
   return user;
+}
+
+const adminSessionTtlMs = 12 * 60 * 60 * 1000;
+
+function adminPassword() {
+  if (!config.isProduction) return process.env.ADMIN_PASSWORD || "admin";
+  const password = process.env.ADMIN_PASSWORD || "";
+  return password.length >= 12 ? password : "";
+}
+
+function isAdminRole(user) {
+  const role = String(user?.papel || "").trim().toLowerCase();
+  return role === "admin" || role === "administrador";
+}
+
+function safeCompare(left, right) {
+  const leftHash = crypto.createHash("sha256").update(String(left || "")).digest();
+  const rightHash = crypto.createHash("sha256").update(String(right || "")).digest();
+  return crypto.timingSafeEqual(leftHash, rightHash);
+}
+
+function createAdminSessionToken() {
+  return createSignedState({
+    type: "admin_session",
+    createdAt: Date.now(),
+    nonce: generateId("adm")
+  });
+}
+
+function hasValidAdminSession(req) {
+  const cookies = parseCookies(req);
+  if (!cookies.admin_session) return false;
+  try {
+    const payload = verifySignedState(cookies.admin_session);
+    return (
+      payload.type === "admin_session" &&
+      Number.isFinite(Number(payload.createdAt)) &&
+      Date.now() - Number(payload.createdAt) <= adminSessionTtlMs
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function isAdminRequest(req) {
+  if (hasValidAdminSession(req)) return true;
+  try {
+    const user = await getSessionUser(req);
+    return isAdminRole(user);
+  } catch {
+    return false;
+  }
+}
+
+async function ensureAdmin(req, res, { redirectTo } = {}) {
+  if (await isAdminRequest(req)) return true;
+  if (redirectTo) {
+    sendRedirect(res, `/admin/login?next=${encodeURIComponent(redirectTo)}`);
+    return false;
+  }
+  sendJson(res, 403, { error: "Acesso admin necessario." });
+  return false;
 }
 
 function permissionModel() {
@@ -186,6 +255,7 @@ function permissionModel() {
 function routePage(urlPath) {
   const map = {
     "/": "index.html",
+    "/admin/login": "admin-login.html",
     "/admin/import": "admin-import.html",
     "/admin/students": "admin-students.html",
     "/composer": "composer.html",
@@ -230,6 +300,54 @@ function serializePendingAction(action) {
   };
 }
 
+const weeklyReportDays = new Set([
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday"
+]);
+
+function serializeWeeklyReportSettings(settings) {
+  return {
+    whatsappNumber: settings.whatsapp_number || "",
+    scheduleDay: settings.schedule_day || "friday",
+    scheduleTime: settings.schedule_time || "09:00",
+    timezone: settings.timezone || "America/Sao_Paulo",
+    timezoneLabel: settings.timezone_label || "BRT",
+    enabled: settings.enabled !== false,
+    updatedAt: settings.updated_at || null
+  };
+}
+
+function normalizeWeeklyReportSettings(body = {}) {
+  const rawDay = String(body.scheduleDay || body.schedule_day || "friday").trim().toLowerCase();
+  const scheduleDay = weeklyReportDays.has(rawDay) ? rawDay : "friday";
+  const rawTime = String(body.scheduleTime || body.schedule_time || "09:00").trim();
+  const timeMatch = rawTime.match(/^(\d{1,2}):(\d{2})$/);
+  let scheduleTime = "09:00";
+  if (timeMatch) {
+    const hour = Number(timeMatch[1]);
+    const minute = Number(timeMatch[2]);
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+      scheduleTime = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    }
+  }
+
+  return {
+    whatsapp_number: String(body.whatsappNumber || body.whatsapp_number || "")
+      .replace(/[^\d+\s().-]/g, "")
+      .trim(),
+    schedule_day: scheduleDay,
+    schedule_time: scheduleTime,
+    timezone: "America/Sao_Paulo",
+    timezone_label: "BRT",
+    enabled: body.enabled !== false
+  };
+}
+
 async function getPendingActionsForUser(userId) {
   return listPendingActionsForUser(userId);
 }
@@ -256,6 +374,403 @@ async function persistPendingAction(user, operation) {
   };
   const created = await createPendingAction(record);
   return serializePendingAction(created);
+}
+
+function normalizeText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+}
+
+function parseSenderName(from = "") {
+  const withoutEmail = String(from).replace(/<[^>]+>/g, "").replaceAll('"', "").trim();
+  if (withoutEmail) return withoutEmail;
+  return parseSenderEmail(from).split("@")[0] || "Remetente";
+}
+
+function parseSenderEmail(from = "") {
+  const match = String(from).match(/<([^>]+)>/);
+  return match?.[1] || String(from).trim();
+}
+
+function senderInitials(name) {
+  const words = String(name || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+  const initials = words.map((word) => word[0]).join("").toUpperCase();
+  return initials || "CI";
+}
+
+function formatEmailDate(dateValue) {
+  const parsed = new Date(dateValue);
+  if (Number.isNaN(parsed.getTime())) {
+    return { date: dateValue || "", time: "" };
+  }
+  return {
+    date: parsed.toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" }),
+    time: parsed.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+  };
+}
+
+function classifyInboxEmail(email) {
+  const text = normalizeText(`${email.from} ${email.subject} ${email.snippet} ${email.bodyPreview}`);
+  if (
+    text.includes("canceled event") ||
+    text.includes("cancelled event") ||
+    text.includes("evento cancelado") ||
+    text.includes("agenda") ||
+    text.includes("reuniao") ||
+    text.includes("meeting") ||
+    text.includes("calendar") ||
+    text.includes("horario") ||
+    text.includes("call")
+  ) {
+    return "Scheduling";
+  }
+  if (
+    text.includes("newsletter") ||
+    text.includes("unsubscribe") ||
+    text.includes("no-reply") ||
+    text.includes("noreply") ||
+    text.includes("promocao") ||
+    text.includes("security alert") ||
+    text.includes("alerta de seguranca") ||
+    text.includes("accounts.google.com")
+  ) {
+    return "Newsletters";
+  }
+  return "Priority";
+}
+
+function scoreInboxEmail(email, category) {
+  const text = normalizeText(`${email.from} ${email.subject} ${email.snippet} ${email.bodyPreview}`);
+  let score = category === "Priority" ? 20 : category === "Scheduling" ? 10 : -4;
+
+  if (
+    text.includes("cliente") ||
+    text.includes("proposta") ||
+    text.includes("contrato") ||
+    text.includes("orcamento") ||
+    text.includes("follow-up") ||
+    text.includes("pagamento")
+  ) {
+    score += 18;
+  }
+
+  if (
+    text.includes("responder") ||
+    text.includes("retorno") ||
+    text.includes("aprovar") ||
+    text.includes("confirmar") ||
+    text.includes("urgente")
+  ) {
+    score += 10;
+  }
+
+  if (
+    text.includes("no-reply") ||
+    text.includes("noreply") ||
+    text.includes("newsletter") ||
+    text.includes("unsubscribe")
+  ) {
+    score -= 12;
+  }
+
+  if (
+    text.includes("canceled event") ||
+    text.includes("cancelled event") ||
+    text.includes("evento cancelado")
+  ) {
+    score -= 8;
+  }
+
+  const time = new Date(email.date).getTime();
+  if (!Number.isNaN(time)) {
+    const daysOld = (Date.now() - time) / 86_400_000;
+    if (daysOld <= 2) score += 4;
+    else if (daysOld <= 7) score += 3;
+    else if (daysOld <= 30) score += 2;
+  }
+
+  return score;
+}
+
+function hasAny(text, terms) {
+  return terms.some((term) => text.includes(term));
+}
+
+function detectValueSignal(email, category, priorityScore) {
+  const text = normalizeText(`${email.from} ${email.subject} ${email.snippet} ${email.bodyPreview}`);
+  const reasons = [];
+  let score = priorityScore;
+  let signal = "Triagem";
+  let valueType = "Operacional";
+  let urgency = "media";
+  let nextStep = "Abrir, entender o contexto e decidir se precisa de resposta.";
+  let risk = "Pode consumir atencao sem gerar proximo passo claro.";
+  let actionKind = "reply";
+
+  const commercialTerms = [
+    "cliente",
+    "lead",
+    "proposta",
+    "proposal",
+    "contrato",
+    "contract",
+    "orcamento",
+    "budget",
+    "pagamento",
+    "invoice",
+    "preco",
+    "valor",
+    "comercial",
+    "venda",
+    "compra",
+    "negociacao",
+    "deal"
+  ];
+  const decisionTerms = [
+    "aprovar",
+    "aprovacao",
+    "validar",
+    "validacao",
+    "decidir",
+    "decisao",
+    "autorizar",
+    "confirmar",
+    "confirmacao",
+    "retorno",
+    "responder",
+    "pendente"
+  ];
+  const urgencyTerms = ["urgente", "hoje", "deadline", "prazo", "asap", "prioridade", "imediato"];
+  const schedulingTerms = [
+    "agenda",
+    "reuniao",
+    "meeting",
+    "call",
+    "horario",
+    "convite",
+    "evento",
+    "calendar",
+    "canceled event",
+    "cancelled event"
+  ];
+  const noiseTerms = [
+    "no-reply",
+    "noreply",
+    "newsletter",
+    "unsubscribe",
+    "alerta de seguranca",
+    "security alert",
+    "accounts.google.com",
+    "promocao"
+  ];
+
+  const commercial = hasAny(text, commercialTerms);
+  const decision = hasAny(text, decisionTerms);
+  const urgent = hasAny(text, urgencyTerms);
+  const scheduling = category === "Scheduling" || hasAny(text, schedulingTerms);
+  const noise = category === "Newsletters" || hasAny(text, noiseTerms);
+
+  if (commercial) {
+    score += 34;
+    reasons.push("sinal comercial");
+  }
+  if (decision) {
+    score += 22;
+    reasons.push("pede retorno ou decisao");
+  }
+  if (urgent) {
+    score += 18;
+    reasons.push("tem linguagem de urgencia");
+  }
+  if (scheduling) {
+    score += 8;
+    reasons.push("envolve agenda ou compromisso");
+  }
+  if (noise) {
+    score -= 42;
+    reasons.push("parece automatico ou informativo");
+  }
+
+  if (noise && !commercial && !decision) {
+    signal = "Ruido filtravel";
+    valueType = "Limpeza";
+    urgency = "baixa";
+    nextStep = "Arquivar ou ignorar, salvo se voce estiver procurando exatamente esse assunto.";
+    risk = "Baixo risco. O valor aqui e reduzir distracao.";
+    actionKind = "archive";
+  } else if (commercial) {
+    signal = "Oportunidade comercial";
+    valueType = "Receita";
+    urgency = urgent || decision ? "alta" : "media";
+    nextStep = decision
+      ? "Preparar resposta objetiva para destravar o proximo passo."
+      : "Preparar follow-up e checar se existe uma proxima acao comercial.";
+    risk = "Perder timing, deixar cliente sem retorno ou esfriar uma oportunidade.";
+  } else if (decision) {
+    signal = "Decisao pendente";
+    valueType = "Execucao";
+    urgency = urgent ? "alta" : "media";
+    nextStep = "Preparar resposta com decisao, pergunta de clarificacao ou proximo passo.";
+    risk = "Manter alguem bloqueado esperando sua resposta.";
+  } else if (scheduling) {
+    signal = "Agenda";
+    valueType = "Tempo";
+    urgency = urgent ? "alta" : "media";
+    nextStep = "Confirmar, reagendar ou responder com disponibilidade.";
+    risk = "Perder alinhamento de horario ou deixar compromisso solto.";
+  }
+
+  if (!reasons.length) reasons.push("mensagem humana possivelmente relevante");
+
+  return {
+    signal,
+    valueType,
+    urgency,
+    score,
+    reasons: reasons.slice(0, 3),
+    nextStep,
+    risk,
+    actionKind
+  };
+}
+
+function summarizeInboxEmail(email, category) {
+  const content = String(email.bodyPreview || email.snippet || "").replace(/\s+/g, " ").trim();
+  const clipped = content.slice(0, 190);
+  if (category === "Scheduling") {
+    return clipped || "Possivel conversa de agenda ou alinhamento de horario.";
+  }
+  if (category === "Newsletters") {
+    return clipped || "Mensagem informativa ou automatizada, com baixa prioridade operacional.";
+  }
+  return clipped || "Mensagem potencialmente relevante para acompanhamento.";
+}
+
+function buildCognitiveAnalysis(email, category) {
+  const subject = email.subject || "sem assunto";
+  if (category === "Scheduling") {
+    return {
+      keyAction: "Verificar disponibilidade e preparar resposta de agenda, se fizer sentido.",
+      impact: "Pode destravar reuniao, alinhamento ou proximo passo operacional.",
+      tags: ["agenda", "resposta", "tempo"]
+    };
+  }
+  if (category === "Newsletters") {
+    return {
+      keyAction: "Ler apenas se houver contexto direto; caso contrario, considerar arquivar.",
+      impact: "Baixo risco imediato. Bom candidato a limpeza de caixa.",
+      tags: ["informativo", "baixa prioridade"]
+    };
+  }
+  return {
+    keyAction: `Avaliar se "${subject}" pede follow-up, resposta ou classificacao.`,
+    impact: "Pode conter interacao comercial, pendencia ou contexto que merece acao.",
+    tags: ["prioridade", "analise", "follow-up"]
+  };
+}
+
+function serializeInboxEmail(email) {
+  const sender = parseSenderName(email.from);
+  const category = classifyInboxEmail(email);
+  const dateParts = formatEmailDate(email.date);
+  const priorityScore = scoreInboxEmail(email, category);
+  const valueSignal = detectValueSignal(email, category, priorityScore);
+  return {
+    id: email.id,
+    threadId: email.threadId,
+    sender,
+    senderEmail: parseSenderEmail(email.from),
+    senderInitials: senderInitials(sender),
+    subject: email.subject,
+    time: dateParts.time,
+    date: dateParts.date,
+    rawDate: email.date,
+    category,
+    priorityScore,
+    businessScore: valueSignal.score,
+    valueSignal,
+    unread: Array.isArray(email.labelIds) ? email.labelIds.includes("UNREAD") : false,
+    content: email.bodyPreview || email.snippet || "",
+    snippet: email.snippet || "",
+    aiSummary: summarizeInboxEmail(email, category),
+    cognitiveAnalysis: buildCognitiveAnalysis(email, category),
+    attachments: [],
+    history: []
+  };
+}
+
+function buildInboxMetrics(emails) {
+  const priority = emails.filter((email) => email.category === "Priority").length;
+  const scheduling = emails.filter((email) => email.category === "Scheduling").length;
+  const newsletters = emails.filter((email) => email.category === "Newsletters").length;
+  const unread = emails.filter((email) => email.unread).length;
+  const actionable = emails.filter((email) => email.valueSignal?.actionKind !== "archive").length;
+  const commercial = emails.filter((email) => email.valueSignal?.valueType === "Receita").length;
+  const highUrgency = emails.filter((email) => email.valueSignal?.urgency === "alta").length;
+  const noise = emails.filter((email) => email.valueSignal?.actionKind === "archive").length;
+  return {
+    emailsProcessed: emails.length,
+    dailyTargetPct: Math.min(100, Math.max(18, emails.length * 8)),
+    timeSavedHrs: Number((emails.length * 0.08 + priority * 0.12).toFixed(1)),
+    pendingCount: priority + scheduling,
+    actionableCount: actionable,
+    commercialCount: commercial,
+    highUrgencyCount: highUrgency,
+    noiseCount: noise,
+    unreadCount: unread,
+    priorityCount: priority,
+    schedulingCount: scheduling,
+    newsletterCount: newsletters,
+    pendingCritical: priority > 0
+  };
+}
+
+function inboxQueryFromUrl(url) {
+  const explicit = url.searchParams.get("q")?.trim();
+  if (explicit) return explicit;
+  const timeframe = url.searchParams.get("timeframe") || "30d";
+  const daysMatch = String(timeframe).match(/^(\d{1,3})d$/);
+  if (daysMatch) return `newer_than:${Math.min(365, Math.max(1, Number(daysMatch[1])))}d -category:social`;
+  if (timeframe === "24h") return "newer_than:1d -category:social";
+  if (timeframe === "90d") return "newer_than:90d -category:social";
+  return "newer_than:30d -category:social";
+}
+
+function clampInboxLimit(value) {
+  const parsed = Number(value || 60);
+  if (!Number.isFinite(parsed)) return 60;
+  return Math.min(200, Math.max(1, parsed));
+}
+
+function archiveOperationFromEmail(email) {
+  return {
+    toolName: "archive_email",
+    permissionLevel: 3,
+    title: "Arquivar mensagem",
+    summary: `Arquivar "${email.subject || "mensagem"}"`,
+    confirmLabel: "Arquivar",
+    editable: false,
+    previewText: `Mensagem alvo: ${email.subject || "sem assunto"}\nRemetente: ${email.from || ""}\nData: ${email.date || ""}`,
+    payload: { messageId: email.id }
+  };
+}
+
+function markAsReadOperationFromEmail(email) {
+  return {
+    toolName: "mark_as_read",
+    permissionLevel: 3,
+    title: "Marcar como lido",
+    summary: `Marcar "${email.subject || "mensagem"}" como lido`,
+    confirmLabel: "Marcar como lido",
+    editable: false,
+    previewText: `Mensagem alvo: ${email.subject || "sem assunto"}\nRemetente: ${email.from || ""}\nData: ${email.date || ""}`,
+    payload: { messageId: email.id }
+  };
 }
 
 async function executePendingAction(user, action, body = {}) {
@@ -322,6 +837,12 @@ async function router(req, res) {
   }
 
   if (req.method === "GET" && routePage(url.pathname)) {
+    if (url.pathname.startsWith("/admin/") && url.pathname !== "/admin/login") {
+      if (!(await ensureAdmin(req, res, { redirectTo: url.pathname }))) return;
+    }
+    if (url.pathname === "/admin/login" && (await isAdminRequest(req))) {
+      return sendRedirect(res, "/admin/import");
+    }
     return sendFile(res, path.join(publicDir, routePage(url.pathname)));
   }
 
@@ -362,7 +883,228 @@ async function router(req, res) {
     });
   }
 
+  if (req.method === "GET" && url.pathname === "/api/weekly-report/settings") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    try {
+      const settings = await getWeeklyReportSettings(user.user_id);
+      return sendJson(res, 200, {
+        ok: true,
+        storageReady: true,
+        settings: serializeWeeklyReportSettings(settings)
+      });
+    } catch (error) {
+      return sendJson(res, 200, {
+        ok: true,
+        storageReady: false,
+        settings: serializeWeeklyReportSettings(defaultWeeklyReportSettings(user.user_id)),
+        error: "Atualize o schema do Supabase para salvar a agenda semanal."
+      });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/weekly-report/settings") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    const patch = normalizeWeeklyReportSettings(body);
+    if (patch.whatsapp_number && patch.whatsapp_number.replace(/\D/g, "").length < 10) {
+      return sendJson(res, 400, { error: "Informe um WhatsApp com DDI e DDD." });
+    }
+    try {
+      const settings = await upsertWeeklyReportSettings(user.user_id, patch);
+      await logAction({
+        userId: user.user_id,
+        turmaId: user.turma_id,
+        actionType: "weekly_report_settings",
+        toolName: "save_weekly_report_settings",
+        status: "success"
+      });
+      return sendJson(res, 200, {
+        ok: true,
+        storageReady: true,
+        settings: serializeWeeklyReportSettings(settings)
+      });
+    } catch (error) {
+      return sendJson(res, 400, {
+        error: "Nao foi possivel salvar. Atualize o schema do Supabase e tente novamente.",
+        detail: config.isProduction ? undefined : error.message
+      });
+    }
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/admin/session") {
+    return sendJson(res, 200, { admin: await isAdminRequest(req) });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/admin/login") {
+    const body = await readBody(req);
+    const expectedPassword = adminPassword();
+    if (!expectedPassword) {
+      return sendJson(res, 500, {
+        error: "ADMIN_PASSWORD ausente ou curta demais no ambiente de producao."
+      });
+    }
+    if (!safeCompare(body.password, expectedPassword)) {
+      return sendJson(res, 401, { error: "Senha administrativa invalida." });
+    }
+    setCookie(res, "admin_session", createAdminSessionToken());
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/admin/logout") {
+    clearCookie(res, "admin_session");
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/inbox/recent") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const query = inboxQueryFromUrl(url);
+    const maxResults = clampInboxLimit(url.searchParams.get("max"));
+    try {
+      const rawEmails = await searchEmails(user.user_id, query, maxResults);
+      const emails = rawEmails
+        .map(serializeInboxEmail)
+        .sort((a, b) => {
+          const scoreDiff = (b.businessScore ?? b.priorityScore) - (a.businessScore ?? a.priorityScore);
+          if (scoreDiff !== 0) return scoreDiff;
+          return new Date(b.rawDate).getTime() - new Date(a.rawDate).getTime();
+        });
+      return sendJson(res, 200, {
+        ok: true,
+        query,
+        emails,
+        metrics: buildInboxMetrics(emails),
+        generatedAt: nowIso()
+      });
+    } catch (error) {
+      return sendJson(res, 400, {
+        error: error.message.includes("Gmail not connected")
+          ? "Conecte seu Gmail para carregar a Smart Inbox."
+          : error.message
+      });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/inbox/actions/archive") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    if (!body.messageId) return sendJson(res, 400, { error: "messageId obrigatorio." });
+    try {
+      const email = await readEmail(user.user_id, body.messageId);
+      const pendingAction = await persistPendingAction(user, archiveOperationFromEmail(email));
+      return sendJson(res, 200, {
+        ok: true,
+        message: "Acao preparada. Confirme para arquivar.",
+        pendingAction
+      });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/inbox/actions/mark-read") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    if (!body.messageId) return sendJson(res, 400, { error: "messageId obrigatorio." });
+    try {
+      const email = await readEmail(user.user_id, body.messageId);
+      const pendingAction = await persistPendingAction(user, markAsReadOperationFromEmail(email));
+      return sendJson(res, 200, {
+        ok: true,
+        message: "Acao preparada. Confirme para marcar como lido.",
+        pendingAction
+      });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/composer/prepare-reply") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    if (!body.messageId) return sendJson(res, 400, { error: "messageId obrigatorio." });
+    try {
+      const result = await prepareReplyForEmail(user.user_id, body.messageId, body.instruction || "");
+      const pendingAction = await persistPendingAction(user, result.operation);
+      await logAction({
+        userId: user.user_id,
+        turmaId: user.turma_id,
+        actionType: "prepare_reply",
+        toolName: result.toolName,
+        status: "success"
+      });
+      return sendJson(res, 200, {
+        answer: result.answer,
+        toolName: result.toolName,
+        pendingAction
+      });
+    } catch (error) {
+      await logAction({
+        userId: user.user_id,
+        turmaId: user.turma_id,
+        actionType: "prepare_reply",
+        toolName: "prepare_reply_error",
+        status: "error"
+      });
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/composer/refine") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    if (!body.draft) return sendJson(res, 400, { error: "Rascunho vazio." });
+    try {
+      const refinedDraft = await refineDraftWithAI(body.draft, body.action || "smart_proof", body.tone || "");
+      return sendJson(res, 200, { ok: true, refinedDraft });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/insights/analyze") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    try {
+      const insight = await runInsightAnalysis(user.user_id, {
+        question: body.question || "",
+        timeframe: body.timeframe || "30d",
+        query: body.query || "",
+        maxResults: body.maxResults || 40
+      });
+      await logAction({
+        userId: user.user_id,
+        turmaId: user.turma_id,
+        actionType: "insight_analysis",
+        toolName: "gmail_insight_analysis",
+        status: "success"
+      });
+      return sendJson(res, 200, { ok: true, insight });
+    } catch (error) {
+      await logAction({
+        userId: user.user_id,
+        turmaId: user.turma_id,
+        actionType: "insight_analysis",
+        toolName: "gmail_insight_analysis",
+        status: "error"
+      });
+      return sendJson(res, 400, {
+        error: error.message.includes("Gmail not connected")
+          ? "Conecte seu Gmail para tirar insights reais da caixa."
+          : error.message
+      });
+    }
+  }
+
   if (req.method === "POST" && url.pathname === "/api/admin/import-students") {
+    if (!(await ensureAdmin(req, res))) return;
     const body = await readBody(req);
     const rows = Array.isArray(body.students) ? body.students : parseImportRows(body.raw || "");
     const createdRows = await importStudents(rows);
@@ -377,6 +1119,7 @@ async function router(req, res) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/admin/students") {
+    if (!(await ensureAdmin(req, res))) return;
     const students = (await listStudents()).map((item) => ({
       ...item,
       invite_link: item.invite_id ? inviteLink(req, item.invite_id) : ""
@@ -428,7 +1171,16 @@ async function router(req, res) {
     const body = await readBody(req);
     try {
       const result = await runAgent(user.user_id, body.message || "");
-      const pendingAction = result.operation ? await persistPendingAction(user, result.operation) : null;
+      const operations = Array.isArray(result.operations)
+        ? result.operations
+        : result.operation
+          ? [result.operation]
+          : [];
+      const pendingActions = [];
+      for (const operation of operations) {
+        pendingActions.push(await persistPendingAction(user, operation));
+      }
+      const pendingAction = pendingActions[0] || null;
       await logAction({
         userId: user.user_id,
         turmaId: user.turma_id,
@@ -442,7 +1194,8 @@ async function router(req, res) {
         emailCount: result.emailCount || 0,
         queryPlan: result.queryPlan || [],
         sources: result.sources || [],
-        pendingAction
+        pendingAction,
+        pendingActions
       });
     } catch (error) {
       await logAction({

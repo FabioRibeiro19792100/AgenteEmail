@@ -216,6 +216,7 @@ export async function readEmail(userId, messageId) {
   return {
     id: data.id,
     threadId: data.threadId,
+    labelIds: data.labelIds || [],
     subject: headers.subject || "(sem assunto)",
     from: headers.from || "",
     replyToEmail: parseEmailAddress(headers["reply-to"] || headers.from || ""),
@@ -230,9 +231,25 @@ export async function readEmail(userId, messageId) {
 export async function searchEmails(userId, query = "", maxResults = 5) {
   const ids = await listRecentEmails(userId, query, Math.max(maxResults, 1));
   const emails = [];
-  for (const item of ids.slice(0, maxResults)) {
-    emails.push(await readEmail(userId, item.id));
+  const failures = [];
+  const selectedIds = ids.slice(0, maxResults);
+
+  for (let index = 0; index < selectedIds.length; index += 8) {
+    const batch = selectedIds.slice(index, index + 8);
+    const results = await Promise.allSettled(batch.map((item) => readEmail(userId, item.id)));
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        emails.push(result.value);
+      } else {
+        failures.push(result.reason);
+      }
+    }
   }
+
+  if (!emails.length && failures.length) {
+    throw failures[0];
+  }
+
   return emails;
 }
 

@@ -100,6 +100,20 @@ export function nowIso() {
   return new Date().toISOString();
 }
 
+export function defaultWeeklyReportSettings(userId) {
+  return {
+    user_id: userId,
+    whatsapp_number: "",
+    schedule_day: "friday",
+    schedule_time: "09:00",
+    timezone: "America/Sao_Paulo",
+    timezone_label: "BRT",
+    enabled: true,
+    created_at: null,
+    updated_at: null
+  };
+}
+
 export async function getUserById(userId) {
   const rows = await selectRows("users", { filters: { user_id: eq(userId) }, limit: 1 });
   return rows[0] || null;
@@ -163,6 +177,36 @@ export async function getPendingActionByIdForUser(actionId, userId) {
 export async function updatePendingAction(actionId, patch) {
   const rows = await updateRows("pending_actions", { id: eq(actionId) }, patch);
   return rows[0] || null;
+}
+
+export async function getWeeklyReportSettings(userId) {
+  const rows = await selectRows("weekly_report_settings", {
+    filters: { user_id: eq(userId) },
+    limit: 1
+  });
+  return rows[0] || defaultWeeklyReportSettings(userId);
+}
+
+export async function upsertWeeklyReportSettings(userId, patch) {
+  const existing = await getWeeklyReportSettings(userId);
+  const now = nowIso();
+  const rows = await insertRows(
+    "weekly_report_settings",
+    [
+      {
+        ...existing,
+        ...patch,
+        user_id: userId,
+        timezone: "America/Sao_Paulo",
+        timezone_label: "BRT",
+        enabled: patch.enabled ?? existing.enabled ?? true,
+        created_at: existing.created_at || now,
+        updated_at: now
+      }
+    ],
+    { upsert: true }
+  );
+  return rows[0] || defaultWeeklyReportSettings(userId);
 }
 
 export async function getReadyStats() {

@@ -11,6 +11,10 @@
       <section class="hero">
         <h1>Alunos e convites</h1>
         <p>Lista centralizada de alunos importados, com links individuais e status do convite.</p>
+        <div class="row">
+          <a href="/admin/import"><button class="ghost" type="button">Importar alunos</button></a>
+          <button id="logoutAdminBtn" class="ghost" type="button">Sair do admin</button>
+        </div>
       </section>
       <section class="panel">
         <div id="students" class="card-list"></div>
@@ -19,21 +23,30 @@
     <script src="/assets/common.js"></script>
     <script>
       (async () => {
-        const data = await api("/api/admin/students");
-        el("students").innerHTML = data.students.map((item) => `
-          <div class="card">
-            <div class="row">
-              <div>
-                <strong>${item.nome}</strong><br />
-                <span class="muted">${item.turma_nome}</span>
+        try {
+          const data = await api("/api/admin/students");
+          el("students").innerHTML = data.students.map((item) => `
+            <div class="card">
+              <div class="row">
+                <div>
+                  <strong>${item.nome}</strong><br />
+                  <span class="muted">${item.turma_nome}</span>
+                </div>
+                <span class="pill">${item.invite_status}</span>
               </div>
-              <span class="pill">${item.invite_status}</span>
+              <p>User ID: ${item.user_id}</p>
+              <a href="${item.invite_link}">${item.invite_link}</a>
             </div>
-            <p>User ID: ${item.user_id}</p>
-            <a href="${item.invite_link}">${item.invite_link}</a>
-          </div>
-        `).join("");
+          `).join("");
+        } catch (error) {
+          el("students").innerHTML = `<div class="card">${error.message}</div>`;
+        }
       })();
+
+      el("logoutAdminBtn").onclick = async () => {
+        await api("/api/admin/logout", { method: "POST" });
+        location.href = "/admin/login";
+      };
     </script>
   </body>
 </html>
