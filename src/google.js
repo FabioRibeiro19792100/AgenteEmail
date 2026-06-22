@@ -219,6 +219,8 @@ export async function readEmail(userId, messageId) {
     labelIds: data.labelIds || [],
     subject: headers.subject || "(sem assunto)",
     from: headers.from || "",
+    to: headers.to || "",
+    cc: headers.cc || "",
     replyToEmail: parseEmailAddress(headers["reply-to"] || headers.from || ""),
     date: headers.date || "",
     snippet: data.snippet || "",
@@ -334,6 +336,17 @@ export async function sendEmail(userId, draftId) {
     body: { id: draftId }
   });
   return { messageId: data.id, threadId: data.threadId };
+}
+
+export async function sendPlainEmail(userId, { to, subject, body }) {
+  const data = await gmailJsonRequest(userId, "messages/send", {
+    method: "POST",
+    requiredScopes: ["https://www.googleapis.com/auth/gmail.send"],
+    body: {
+      raw: buildRawEmail({ to, subject, body })
+    }
+  });
+  return { messageId: data.id, threadId: data.threadId, to };
 }
 
 export async function replyEmail(userId, messageId, content) {

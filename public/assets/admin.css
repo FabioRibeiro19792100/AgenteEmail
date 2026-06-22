@@ -286,6 +286,23 @@ button {
   line-height: 1.45;
 }
 
+.admin-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 12px;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--admin-indigo);
+}
+
 .admin-actions {
   display: flex;
   flex-wrap: wrap;
@@ -375,6 +392,24 @@ button {
   font-size: 11px;
   font-weight: 900;
   padding: 5px 9px;
+}
+
+.admin-pill.is-sent {
+  border-color: rgba(22, 163, 74, 0.35);
+  background: #dcfce7;
+  color: #166534;
+}
+
+.admin-pill.is-warning {
+  border-color: rgba(217, 119, 6, 0.35);
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.admin-pill.is-error {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .admin-status {

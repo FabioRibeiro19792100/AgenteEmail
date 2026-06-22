@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MailFlow Intelligence</title>
-    <link rel="stylesheet" href="/assets/mailflow.css?v=29" />
+    <link rel="stylesheet" href="/assets/mailflow.css?v=30" />
   </head>
   <body>
     <div id="toast" class="mf-toast" hidden></div>
@@ -86,6 +86,7 @@
 
           <div class="mf-controls" aria-label="Filtros da exploração">
             <select id="timeframeSelect" aria-label="Janela de tempo">
+              <option value="7d">7 dias</option>
               <option value="30d">30 dias</option>
               <option value="60d">60 dias</option>
               <option value="90d">90 dias</option>
@@ -98,6 +99,20 @@
               <option value="300">300 emails</option>
               <option value="500">500 emails</option>
             </select>
+            <div class="mf-category-filters" aria-label="Categorias do Gmail">
+              <label>
+                <input id="categoryPrimary" type="checkbox" value="primary" checked />
+                <span>Principal</span>
+              </label>
+              <label>
+                <input id="categorySocial" type="checkbox" value="social" />
+                <span>Social</span>
+              </label>
+              <label>
+                <input id="categoryPromotions" type="checkbox" value="promotions" />
+                <span>Promoções</span>
+              </label>
+            </div>
             <button id="syncBtn" class="mf-sync-status" type="button">
               <span id="syncIcon" aria-hidden="true"></span>
               <span id="syncLabel">Gmail sincronizado</span>
@@ -301,10 +316,12 @@
         activeModeId: "auditor",
         timeframe: "90d",
         emailLimit: 200,
+        categories: ["primary"],
         inbox: [],
         metrics: null,
         latestInsight: null,
         pendingActions: [],
+        findingArtifacts: {},
         chatHistory: [],
         reportSettings: {
           whatsappNumber: "",
@@ -454,7 +471,24 @@
       }
 
       function timeframeText() {
-        return { "30d": "30 dias", "60d": "60 dias", "90d": "90 dias", "180d": "180 dias", "365d": "365 dias" }[state.timeframe] || state.timeframe;
+        return { "7d": "7 dias", "30d": "30 dias", "60d": "60 dias", "90d": "90 dias", "180d": "180 dias", "365d": "365 dias" }[state.timeframe] || state.timeframe;
+      }
+
+      function selectedCategories() {
+        const categories = [];
+        if (el("categoryPrimary").checked) categories.push("primary");
+        if (el("categorySocial").checked) categories.push("social");
+        if (el("categoryPromotions").checked) categories.push("promotions");
+        return categories.length ? categories : ["primary"];
+      }
+
+      function categoryText() {
+        const labels = {
+          primary: "Principal",
+          social: "Social",
+          promotions: "Promoções"
+        };
+        return state.categories.map((category) => labels[category] || category).join(" + ");
       }
 
       function reportScheduleText(settings = state.reportSettings) {
@@ -496,6 +530,7 @@
           button.onclick = () => {
             state.activeModeId = button.dataset.mode;
             state.latestInsight = null;
+            state.findingArtifacts = {};
             state.chatHistory = [];
             renderAll();
           };
@@ -516,6 +551,9 @@
         el("chatInput").placeholder = `Pergunte ao ${mode.name} sobre seus emails...`;
         el("timeframeSelect").value = state.timeframe;
         el("emailLimitSelect").value = String(state.emailLimit);
+        el("categoryPrimary").checked = state.categories.includes("primary");
+        el("categorySocial").checked = state.categories.includes("social");
+        el("categoryPromotions").checked = state.categories.includes("promotions");
         el("connectBtn").querySelector("span:last-child").textContent = connections.gmailConnected ? "Reconectar" : "Conectar";
         el("userName").textContent = mailboxIdentity.name;
         el("userScope").textContent = mailboxIdentity.detail;
@@ -552,7 +590,7 @@
           {
             label: "Emails rastreados",
             value: scanned ?? inboxCount,
-            detail: `Até ${state.emailLimit} emails • ${timeframeText()}`
+            detail: `Até ${state.emailLimit} emails • ${timeframeText()} • ${categoryText()}`
           },
           {
             label: "Emails usados pela IA",
@@ -621,16 +659,242 @@
       }
 
       function agentOfferForInsight(item) {
-        const offer = String(item?.agentOffer || "").trim();
-        if (offer) return offer;
-        const nextAction = String(item?.nextAction || "").trim();
-        if (nextAction) return `Quer que eu faça isso para você: ${nextAction}?`;
+        const actions = actionsForInsight(item);
+        const primary = actions[0];
+        if (primary?.offer) return primary.offer;
+        const profile = insightActionProfile(item);
+        if (profile === "paid") return "Quer que eu registre esse pagamento como quitado para controle?";
+        if (profile === "payable") return "Quer que eu crie uma pendência de pagamento com dados, prazo e próximo passo?";
+        if (profile === "opportunity") return "Quer que eu gere um briefing da oportunidade ou prepare uma resposta?";
+        if (profile === "negotiation") return "Quer que eu gere um briefing de negociações para acompanhamento?";
+        if (profile === "noise") return "Quer que eu limpe esse ruído do acompanhamento financeiro?";
+        if (primary?.action === "note") return "Quer que eu gere uma nota acionável com os detalhes deste achado?";
+        if (primary?.action === "reply") return "Quer que eu prepare uma resposta para este email?";
+        if (primary?.action === "label") return `Quer que eu aplique a label "${primary.labelPreview}" neste email?`;
+        if (primary?.action === "mark-read") return "Quer que eu marque este email como lido?";
+        if (primary?.action === "archive") return "Quer que eu arquive este email?";
+        return "Quer que eu prepare uma ação segura para este achado?";
+      }
 
+      function insightText(item) {
+        return [
+          item?.type,
+          item?.title,
+          item?.claim,
+          item?.whyItMatters,
+          item?.nextAction,
+          activeMode().id
+        ].join(" ").toLowerCase();
+      }
+
+      function hasAnyWord(text, words) {
+        return words.some((word) => text.includes(word));
+      }
+
+      function normalizeRecommendedActionKind(kind) {
+        const normalized = String(kind || "").trim().toLowerCase();
+        const aliases = {
+          generate_note: "note",
+          note: "note",
+          create_note: "note",
+          prepare_reply: "reply",
+          reply: "reply",
+          reply_email: "reply",
+          apply_label: "label",
+          label: "label",
+          mark_read: "mark-read",
+          mark_as_read: "mark-read",
+          "mark-read": "mark-read",
+          archive: "archive",
+          archive_email: "archive"
+        };
+        return aliases[normalized] || "";
+      }
+
+      function recommendedActionsForInsight(item) {
+        const recommended = Array.isArray(item?.recommendedActions) ? item.recommendedActions : [];
+        return recommended
+          .map((action) => {
+            const internalAction = normalizeRecommendedActionKind(action?.kind);
+            if (!internalAction) return null;
+            return {
+              action: internalAction,
+              label: action?.label || defaultActionLabel(internalAction),
+              offer: action?.offer || "",
+              labelPreview: action?.labelValue || action?.labelName || labelForInsight(item),
+              preview: action?.preview || "",
+              source: "recommended"
+            };
+          })
+          .filter(Boolean)
+          .filter((action, index, list) => list.findIndex((item) => item.action === action.action) === index)
+          .slice(0, 4);
+      }
+
+      function defaultActionLabel(action) {
+        const labels = {
+          note: "Gerar nota",
+          reply: "Preparar resposta",
+          label: "Aplicar label",
+          "mark-read": "Marcar lido",
+          archive: "Arquivar"
+        };
+        return labels[action] || "Agir";
+      }
+
+      function operationalTypeLabel(value) {
+        const labels = {
+          conta_a_pagar: "conta a pagar",
+          pagamento_quitado: "pagamento quitado",
+          resposta_necessaria: "resposta necessária",
+          oportunidade_comercial: "oportunidade comercial",
+          reuniao_agenda: "agenda",
+          documento_para_organizar: "documento",
+          newsletter_ruido: "ruído",
+          promessa_recebida: "promessa recebida",
+          promessa_feita_por_mim: "promessa feita por mim",
+          risco_futuro: "risco futuro",
+          contato_importante: "contato importante",
+          informacao_para_salvar: "informação para salvar",
+          negociacao_contrato: "negociação/contrato"
+        };
+        return labels[String(value || "").trim()] || "";
+      }
+
+      function isTransactionalInsight(item) {
+        const text = insightText(item);
+        return hasAnyWord(text, [
+          "fatura",
+          "boleto",
+          "vencimento",
+          "vencer",
+          "vencida",
+          "conta",
+          "cobranca",
+          "cobrança",
+          "pagamento",
+          "claro",
+          "operadora",
+          "servico",
+          "serviço",
+          "assinatura",
+          "invoice",
+          "recibo",
+          "comprovante",
+          "pix",
+          "cartao",
+          "cartão"
+        ]);
+      }
+
+      function isHumanReplyInsight(item) {
+        const text = insightText(item);
+        if (isTransactionalInsight(item) || hasAnyWord(text, ["no-reply", "noreply", "newsletter"])) return false;
+        return hasAnyWord(text, [
+          "respost",
+          "retorno",
+          "responder",
+          "pergunta",
+          "cliente",
+          "parceiro",
+          "reuniao",
+          "reunião",
+          "confirmar",
+          "aprovar"
+        ]);
+      }
+
+      function insightActionProfile(item) {
+        const operationalType = String(item?.operationalType || "").trim();
+        const operationalProfiles = {
+          conta_a_pagar: "payable",
+          pagamento_quitado: "paid",
+          resposta_necessaria: "reply",
+          oportunidade_comercial: "opportunity",
+          reuniao_agenda: "reply",
+          documento_para_organizar: "note",
+          newsletter_ruido: "noise",
+          promessa_recebida: "reply",
+          promessa_feita_por_mim: "note",
+          risco_futuro: "note",
+          contato_importante: "opportunity",
+          informacao_para_salvar: "note",
+          negociacao_contrato: "negotiation"
+        };
+        if (operationalProfiles[operationalType]) return operationalProfiles[operationalType];
+
+        const text = insightText(item);
         const type = String(item?.type || "").toLowerCase();
-        if (type.includes("pendencia")) return "Quer que eu prepare uma resposta ou uma lista de follow-ups para você?";
-        if (type.includes("risco")) return "Quer que eu monte um plano curto para reduzir esse risco?";
-        if (type.includes("oportunidade")) return "Quer que eu prepare uma resposta para aproveitar essa oportunidade?";
-        return "Quer que eu investigue esse achado e proponha o próximo passo?";
+        if (
+          type.includes("ruido") ||
+          hasAnyWord(text, ["promocional", "promocionais", "ofertas", "newsletter", "sodramar", "piscina", "sauna"])
+        ) {
+          return "noise";
+        }
+        if (
+          hasAnyWord(text, ["sem saldo pendente", "quitacao", "quitação", "quitado", "pagamento confirmado", "recibo", "comprovante"]) ||
+          (hasAnyWord(text, ["pagamento"]) && hasAnyWord(text, ["confirmado", "registrado", "recebimento"]))
+        ) {
+          return "paid";
+        }
+        if (
+          hasAnyWord(text, ["a vencer", "vencimento", "vencer", "pendente", "solicitado", "dados bancarios", "dados bancários", "pagamento parcial", "boleto", "fatura"]) &&
+          !hasAnyWord(text, ["sem saldo pendente", "quitado"])
+        ) {
+          return "payable";
+        }
+        if (hasAnyWord(text, ["investidor", "investimento", "captação", "captacao", "captar capital", "capital", "crescimento"])) {
+          return "opportunity";
+        }
+        if (hasAnyWord(text, ["negociacao", "negociação", "propostas", "proposta formal", "contrato", "orçamento", "orcamento", "valores cobrados", "fluxo de caixa"])) {
+          return "negotiation";
+        }
+        return "note";
+      }
+
+      function noteActionLabel(item) {
+        const profile = insightActionProfile(item);
+        if (profile === "paid") return "Registrar quitado";
+        if (profile === "payable") return "Criar pendência";
+        if (profile === "opportunity") return "Gerar briefing";
+        if (profile === "negotiation") return "Gerar briefing";
+        if (profile === "noise") return "Gerar regra";
+        return "Gerar nota";
+      }
+
+      function actionsForInsight(item) {
+        const recommended = recommendedActionsForInsight(item);
+        if (recommended.length) return recommended.slice(0, 3);
+
+        const profile = insightActionProfile(item);
+        const labelPreview = labelForInsight(item);
+        const actions = [];
+
+        if (profile === "reply") {
+          actions.push({ action: "reply", label: "Preparar resposta" });
+        } else if (profile === "noise") {
+          actions.push({ action: "archive", label: "Arquivar ruído" });
+          actions.push({ action: "label", label: "Label Promoções", labelPreview });
+          actions.push({ action: "note", label: noteActionLabel(item) });
+        } else {
+          actions.push({ action: "note", label: noteActionLabel(item) });
+        }
+
+        if (profile === "opportunity" || profile === "negotiation" || isHumanReplyInsight(item)) {
+          actions.push({ action: "reply", label: "Preparar resposta" });
+        }
+
+        if (profile !== "noise") {
+          actions.push({ action: "label", label: "Aplicar label", labelPreview });
+        }
+
+        if (profile !== "opportunity" && profile !== "negotiation") {
+          actions.push({ action: "mark-read", label: "Marcar lido" });
+        }
+
+        return actions
+          .filter((action, index, list) => list.findIndex((item) => item.action === action.action) === index)
+          .slice(0, 3);
       }
 
       function renderFindings(result) {
@@ -647,8 +911,12 @@
               ${insights.slice(0, 7).map((item, index) => {
                 const type = item.type || "achado";
                 const confidence = item.confidence ? ` • ${item.confidence}` : "";
+                const operation = operationalTypeLabel(item.operationalType);
                 const source = sourceForInsight(result, item);
                 const messageId = source?.id || "";
+                const actions = actionsForInsight(item);
+                const executableActions = actions.filter((action) => action.action === "note" || messageId);
+                const artifact = state.findingArtifacts[index];
                 const evidences = Array.isArray(item.evidenceIndexes) && item.evidenceIndexes.length
                   ? `Evidências: ${item.evidenceIndexes.slice(0, 4).map((evidenceIndex) => `#${evidenceIndex}`).join(", ")}`
                   : "Evidência ranqueada pelo Gmail";
@@ -656,7 +924,7 @@
                   <article class="mf-finding-card">
                     <div class="mf-finding-meta">
                       <span>Achado ${index + 1}</span>
-                      <small>${escapeHtml(type)}${escapeHtml(confidence)}</small>
+                      <small>${escapeHtml(type)}${escapeHtml(confidence)}${operation ? ` • ${escapeHtml(operation)}` : ""}</small>
                     </div>
                     <h4>${escapeHtml(item.title || "Insight")}</h4>
                     <p>${escapeHtml(item.claim || "Sem descrição clara para este achado.")}</p>
@@ -666,16 +934,24 @@
                       <span>Agente</span>
                       <strong>${escapeHtml(agentOfferForInsight(item))}</strong>
                     </div>
-                    ${messageId ? `
+                    ${executableActions.length ? `
                       <div class="mf-finding-actions">
-                        <button type="button" data-finding-action="reply" data-message-id="${escapeHtml(messageId)}" data-insight-index="${index}">Preparar resposta</button>
-                        <button type="button" data-finding-action="label" data-message-id="${escapeHtml(messageId)}" data-insight-index="${index}">Aplicar label</button>
-                        <button type="button" data-finding-action="mark-read" data-message-id="${escapeHtml(messageId)}" data-insight-index="${index}">Marcar lido</button>
-                        <button type="button" data-finding-action="archive" data-message-id="${escapeHtml(messageId)}" data-insight-index="${index}">Arquivar</button>
+                        ${executableActions.map((action, actionIndex) => `
+                          <button type="button" data-finding-action="${escapeHtml(action.action)}" data-message-id="${escapeHtml(messageId)}" data-insight-index="${index}" data-action-index="${actionIndex}">${escapeHtml(action.label)}</button>
+                        `).join("")}
                       </div>
                     ` : `
                       <small class="mf-finding-no-action">Sem email alvo suficiente para executar ação.</small>
                     `}
+                    ${artifact ? `
+                      <div class="mf-inline-artifact">
+                        <div class="mf-inline-artifact-head">
+                          <span>${escapeHtml(artifact.title || "Artefato gerado")}</span>
+                          <button type="button" data-copy-artifact="${index}">Copiar</button>
+                        </div>
+                        <textarea data-artifact-edit="${index}" rows="8">${escapeHtml(artifact.content || "")}</textarea>
+                      </div>
+                    ` : ""}
                   </article>
                 `;
               }).join("")}
@@ -713,6 +989,118 @@
         ].filter(Boolean).join("\n");
       }
 
+      function noteForInsight(insight, source, selectedAction = null) {
+        if (selectedAction?.preview) return selectedAction.preview;
+        const profile = insightActionProfile(insight);
+        if (profile === "paid") {
+          return [
+            `# Registro de pagamento quitado - ${insight?.title || "Pagamento"}`,
+            "",
+            "Status: quitado / sem ação de pagamento pendente",
+            source?.from ? `Origem: ${source.from}` : "",
+            source?.subject ? `Email base: ${source.subject}` : "",
+            source?.date ? `Data do email: ${source.date}` : "",
+            "",
+            "## Evidência",
+            insight?.claim || "Pagamento confirmado.",
+            "",
+            "## Impacto",
+            insight?.whyItMatters || "Mantém o controle financeiro atualizado.",
+            "",
+            "## Próximo passo",
+            "Guardar como comprovante, aplicar label financeira e marcar como lido se não houver ação pendente."
+          ].filter(Boolean).join("\n");
+        }
+        if (profile === "payable") {
+          return [
+            `# Pendência de pagamento - ${insight?.title || "Pagamento pendente"}`,
+            "",
+            "Status: precisa acompanhar / confirmar pagamento",
+            source?.from ? `Origem: ${source.from}` : "",
+            source?.subject ? `Email base: ${source.subject}` : "",
+            source?.date ? `Data do email: ${source.date}` : "",
+            "",
+            "## O que precisa ser resolvido",
+            insight?.claim || "Há uma cobrança ou solicitação de pagamento.",
+            "",
+            "## Por que importa",
+            insight?.whyItMatters || "Evita atraso, interrupção de serviço ou perda de oportunidade.",
+            "",
+            "## Próximo passo",
+            insight?.nextAction || "Conferir dados, valor, vencimento e responsável antes de pagar ou responder."
+          ].filter(Boolean).join("\n");
+        }
+        if (profile === "opportunity") {
+          return [
+            `# Briefing de oportunidade - ${insight?.title || "Oportunidade"}`,
+            "",
+            source?.from ? `Contato: ${source.from}` : "",
+            source?.subject ? `Email base: ${source.subject}` : "",
+            source?.date ? `Data: ${source.date}` : "",
+            "",
+            "## Oportunidade detectada",
+            insight?.claim || "Há uma oportunidade comercial ou estratégica.",
+            "",
+            "## Por que vale atenção",
+            insight?.whyItMatters || "Pode gerar receita, parceria ou avanço estratégico.",
+            "",
+            "## Próxima ação sugerida",
+            "Preparar resposta objetiva, pedir reunião ou separar materiais de apoio antes de responder."
+          ].filter(Boolean).join("\n");
+        }
+        if (profile === "negotiation") {
+          return [
+            `# Briefing de negociações - ${insight?.title || "Negociação"}`,
+            "",
+            "Status: acompanhar propostas / contratos / valores",
+            "",
+            "## Padrão observado",
+            insight?.claim || "Há movimentação financeira ou contratual em andamento.",
+            "",
+            "## Impacto",
+            insight?.whyItMatters || "Ajuda a acompanhar fluxo de caixa, orçamento e decisões pendentes.",
+            "",
+            "## Próximo passo",
+            insight?.nextAction || "Separar emails relacionados, revisar valores e decidir quem precisa responder."
+          ].filter(Boolean).join("\n");
+        }
+        if (profile === "noise") {
+          return [
+            `# Regra sugerida para ruído - ${insight?.title || "Ruído"}`,
+            "",
+            "Tipo: mensagem promocional ou pouco relevante",
+            source?.from ? `Remetente exemplo: ${source.from}` : "",
+            "",
+            "## Por que é ruído",
+            insight?.claim || "Mensagem não essencial para o acompanhamento atual.",
+            "",
+            "## Ação segura",
+            "Aplicar label de promoções/ruído ou arquivar depois de confirmar que não há obrigação financeira real."
+          ].filter(Boolean).join("\n");
+        }
+        return [
+          `# Nota organizada - ${insight?.title || activeMode().name}`,
+          "",
+          `Exploração: ${activeMode().name}`,
+          `Tipo de achado: ${insight?.type || "achado"}`,
+          source?.from ? `Origem: ${source.from}` : "",
+          source?.subject ? `Email base: ${source.subject}` : "",
+          source?.date ? `Data: ${source.date}` : "",
+          "",
+          "## O que foi encontrado",
+          insight?.claim || "Sem descrição clara.",
+          "",
+          "## Por que importa",
+          insight?.whyItMatters || "Relevância não especificada pela análise.",
+          "",
+          "## Próximo uso sugerido",
+          insight?.nextAction || "Usar esta nota para comparar, decidir ou encaminhar o assunto.",
+          "",
+          source?.snippet ? "## Evidência principal" : "",
+          source?.snippet || ""
+        ].filter((line, index, list) => line || list[index - 1]).join("\n").trim();
+      }
+
       function renderSources(result) {
         const sources = Array.isArray(result?.sources) ? result.sources : [];
         if (!sources.length) return "";
@@ -728,7 +1116,7 @@
                   <header>
                     <div>
                       <span class="mf-email-from">${escapeHtml(source.from || "Remetente desconhecido")}</span>
-                      <small>#${escapeHtml(source.index)} · ${escapeHtml(source.kind || "email")} · score ${escapeHtml(source.score ?? "-")}</small>
+                      <small>#${escapeHtml(source.index)} · ${escapeHtml(source.direction || "recebido")} · ${escapeHtml(source.kind || "email")} · score ${escapeHtml(source.score ?? "-")}</small>
                     </div>
                     <time>${escapeHtml(source.date || "")}</time>
                   </header>
@@ -835,12 +1223,14 @@
       function readFilters() {
         state.timeframe = el("timeframeSelect").value;
         state.emailLimit = Number(el("emailLimitSelect").value || 200);
+        state.categories = selectedCategories();
       }
 
       function inboxParams() {
         const params = new URLSearchParams({
           timeframe: state.timeframe,
-          max: String(state.emailLimit)
+          max: String(state.emailLimit),
+          categories: state.categories.join(",")
         });
         return params.toString();
       }
@@ -956,9 +1346,24 @@
         ];
       }
 
-      async function prepareFindingAction(actionType, messageId, insightIndex) {
-        if (!messageId || state.actionBusy) return;
+      async function prepareFindingAction(actionType, messageId, insightIndex, actionIndex = 0) {
+        if ((!messageId && actionType !== "note") || state.actionBusy) return;
         const insight = state.latestInsight?.insights?.[Number(insightIndex)] || {};
+        const source = sourceForInsight(state.latestInsight, insight);
+        const selectedAction = actionsForInsight(insight)[Number(actionIndex)] || actionsForInsight(insight)[0] || {};
+        if (actionType === "note") {
+          const index = Number(insightIndex);
+          state.findingArtifacts = {
+            ...state.findingArtifacts,
+            [index]: {
+              title: selectedAction.label || noteActionLabel(insight),
+              content: noteForInsight(insight, source, selectedAction)
+            }
+          };
+          renderAll();
+          toast(`${selectedAction.label || noteActionLabel(insight)} gerado no achado.`);
+          return;
+        }
         state.actionBusy = true;
         renderAll();
         try {
@@ -968,7 +1373,7 @@
               method: "POST",
               body: JSON.stringify({
                 messageId,
-                instruction: instructionForInsight(insight)
+                instruction: selectedAction.preview || instructionForInsight(insight)
               })
             });
           } else if (actionType === "label") {
@@ -976,7 +1381,7 @@
               method: "POST",
               body: JSON.stringify({
                 messageId,
-                label: labelForInsight(insight)
+                label: selectedAction.labelPreview || labelForInsight(insight)
               })
             });
           } else if (actionType === "mark-read") {
@@ -1001,11 +1406,41 @@
         }
       }
 
+      async function copyFindingArtifact(index) {
+        const editNode = Array.from(document.querySelectorAll("[data-artifact-edit]"))
+          .find((node) => node.dataset.artifactEdit === String(index));
+        const content = editNode?.value || state.findingArtifacts[index]?.content || "";
+        try {
+          await navigator.clipboard.writeText(content);
+          toast("Artefato copiado.");
+        } catch {
+          toast("Se o navegador bloquear, copie pelo campo do achado.");
+        }
+      }
+
       async function resolvePendingAction(actionId, command) {
         if (!actionId || state.actionBusy) return;
+        const action = state.pendingActions.find((item) => item.id === actionId);
         const editNode = Array.from(document.querySelectorAll("[data-action-edit]"))
           .find((node) => node.dataset.actionEdit === actionId);
         const editedContent = editNode?.value || "";
+        if (action?.local) {
+          if (command === "cancel") {
+            state.pendingActions = state.pendingActions.filter((item) => item.id !== actionId);
+            renderAll();
+            toast("Nota removida.");
+            return;
+          }
+          try {
+            await navigator.clipboard.writeText(editedContent || action.previewText || "");
+            state.pendingActions = state.pendingActions.filter((item) => item.id !== actionId);
+            renderAll();
+            toast("Nota copiada.");
+          } catch {
+            toast("Nota pronta. Se o navegador bloquear, copie pelo campo acima.");
+          }
+          return;
+        }
         state.actionBusy = true;
         renderAll();
         try {
@@ -1036,6 +1471,7 @@
         if (!cleanQuestion) return;
 
         if (options.asChat) addMessage("user", cleanQuestion);
+        state.findingArtifacts = {};
         state.analyzing = true;
         state.chatLoading = Boolean(options.asChat);
         renderAll();
@@ -1047,7 +1483,8 @@
               question: `${mode.agentDo}\n\nPergunta específica: ${cleanQuestion}`,
               timeframe: state.timeframe,
               query: "",
-              maxResults: state.emailLimit
+              maxResults: state.emailLimit,
+              categories: state.categories
             })
           });
           state.latestInsight = data.insight;
@@ -1066,12 +1503,14 @@
       async function applyFiltersAndLoad() {
         readFilters();
         state.latestInsight = null;
+        state.findingArtifacts = {};
         await loadInbox();
       }
 
       async function syncGmailNow() {
         readFilters();
         state.latestInsight = null;
+        state.findingArtifacts = {};
         await loadInbox();
         toast("Gmail sincronizado com os filtros atuais.");
       }
@@ -1111,7 +1550,8 @@
           prepareFindingAction(
             findingButton.dataset.findingAction,
             findingButton.dataset.messageId,
-            findingButton.dataset.insightIndex
+            findingButton.dataset.insightIndex,
+            findingButton.dataset.actionIndex
           );
           return;
         }
@@ -1125,10 +1565,19 @@
         const cancelButton = event.target.closest("[data-action-cancel]");
         if (cancelButton) {
           resolvePendingAction(cancelButton.dataset.actionCancel, "cancel");
+          return;
+        }
+
+        const copyArtifactButton = event.target.closest("[data-copy-artifact]");
+        if (copyArtifactButton) {
+          copyFindingArtifact(copyArtifactButton.dataset.copyArtifact);
         }
       });
       el("timeframeSelect").onchange = applyFiltersAndLoad;
       el("emailLimitSelect").onchange = applyFiltersAndLoad;
+      el("categoryPrimary").onchange = applyFiltersAndLoad;
+      el("categorySocial").onchange = applyFiltersAndLoad;
+      el("categoryPromotions").onchange = applyFiltersAndLoad;
 
       boot();
     </script>

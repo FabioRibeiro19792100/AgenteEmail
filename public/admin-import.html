@@ -38,7 +38,7 @@
           <div>
             <span>Cadastro administrativo</span>
             <h1>Cadastrar turma</h1>
-            <p>Informe o nome da turma, cole uma linha por aluno e gere os links individuais de acesso.</p>
+            <p>Informe a turma, cole os emails dos alunos e gere os links individuais de acesso.</p>
           </div>
         </header>
 
@@ -50,12 +50,16 @@
             </label>
 
             <label>
-              <strong>Alunos</strong>
-              <textarea id="raw" rows="10" placeholder="João Silva&#10;Maria Costa&#10;Pedro Lima"></textarea>
+              <strong>Emails dos alunos</strong>
+              <textarea id="raw" rows="10" placeholder="camila@email.com&#10;joao@email.com&#10;maria@email.com"></textarea>
             </label>
-            <small class="admin-hint">Também aceita: nome, turma, email, papel, instituição. Se a linha tiver turma própria, ela substitui o campo acima.</small>
+            <small class="admin-hint">Use um email por linha. Também aceita: email, turma ou nome, turma, email.</small>
+            <label class="admin-check">
+              <input id="sendEmails" type="checkbox" checked />
+              <span>Enviar automaticamente pelo Gmail conectado nesta sessão</span>
+            </label>
             <div class="admin-actions">
-              <button id="importBtn" class="admin-button" type="button">Gerar links da turma</button>
+              <button id="importBtn" class="admin-button" type="button">Gerar e enviar convites</button>
             </div>
             <p id="status" class="admin-status"></p>
           </div>
@@ -82,15 +86,41 @@
           .replaceAll("'", "&#039;");
       }
 
+      function isEmail(value) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+      }
+
+      function nameFromEmail(email) {
+        const localPart = String(email || "").split("@")[0] || "aluno";
+        return localPart
+          .replace(/[._-]+/g, " ")
+          .trim()
+          .replace(/\b\w/g, (letter) => letter.toUpperCase()) || email;
+      }
+
+      function deliveryText(delivery) {
+        if (delivery?.status === "sent") return "Email enviado";
+        if (delivery?.status === "error") return `Erro no envio: ${delivery.error}`;
+        if (delivery?.status === "not_sent") return delivery.error || "Link gerado, email não enviado";
+        return "Link gerado";
+      }
+
+      function deliveryClass(delivery) {
+        if (delivery?.status === "sent") return "is-sent";
+        if (delivery?.status === "error") return "is-error";
+        if (delivery?.status === "not_sent") return "is-warning";
+        return "";
+      }
+
       function parseStudentLine(line, defaultTurma) {
         const parts = line.split(",").map((item) => item.trim());
-        if (parts.length === 1) {
+        if (isEmail(parts[0])) {
           return {
-            nome: parts[0],
-            turma: defaultTurma,
-            email: "",
-            papel: "",
-            instituicao: ""
+            nome: nameFromEmail(parts[0]),
+            turma: parts[1] || defaultTurma,
+            email: parts[0],
+            papel: parts[2] || "",
+            instituicao: parts[3] || ""
           };
         }
         return {
@@ -109,10 +139,10 @@
           .map((line) => line.trim())
           .filter(Boolean)
           .map((line) => parseStudentLine(line, turma))
-          .filter((student) => student.nome);
+          .filter((student) => student.email && isEmail(student.email));
 
         if (!students.length) {
-          el("status").textContent = "Cole pelo menos um aluno.";
+          el("status").textContent = "Cole pelo menos um email válido.";
           return;
         }
 
@@ -121,20 +151,28 @@
         try {
           const data = await api("/api/admin/import-students", {
             method: "POST",
-            body: JSON.stringify({ students })
+            body: JSON.stringify({
+              students,
+              sendEmails: el("sendEmails").checked
+            })
           });
 
           el("result").innerHTML = data.created.map((item) => `
             <article class="admin-card">
-              <strong>${escapeHtml(item.nome)}</strong><br />
-              <small>${escapeHtml(item.turma)}</small><br />
+              <div class="admin-card-row">
+                <div>
+                  <strong>${escapeHtml(item.email || item.nome)}</strong><br />
+                  <small>${escapeHtml(item.turma)}</small>
+                </div>
+                <span class="admin-pill ${deliveryClass(item.delivery)}">${escapeHtml(deliveryText(item.delivery))}</span>
+              </div>
               <a href="${escapeHtml(item.link)}">${escapeHtml(item.link)}</a>
             </article>
           `).join("");
 
           el("linksPanel").hidden = data.created.length === 0;
           el("status").textContent = data.created.length
-            ? `${data.created.length} link(s) gerado(s).`
+            ? `${data.created.length} convite(s) processado(s)${data.senderEmail ? ` por ${data.senderEmail}` : ""}.`
             : "Nenhum aluno válido encontrado.";
         } catch (error) {
           el("status").textContent = error.message;

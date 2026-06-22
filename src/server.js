@@ -37,7 +37,8 @@ import {
   replyEmail,
   revokeGmailConnection,
   saveGmailConnection,
-  sendEmail
+  sendEmail,
+  sendPlainEmail
 } from "./google.js";
 import { createSignedState, verifySignedState } from "./security.js";
 
@@ -275,7 +276,19 @@ function parseImportRows(rawInput) {
     .map((line) => line.trim())
     .filter(Boolean);
   return lines.map((line) => {
-    const [nome, turma, email, papel, instituicao] = line.split(",").map((item) => item?.trim() || "");
+    const parts = line.split(",").map((item) => item?.trim() || "");
+    const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(parts[0] || "");
+    if (looksLikeEmail) {
+      const [email, turma, papel, instituicao] = parts;
+      return {
+        nome: email.split("@")[0] || email,
+        turma: turma || "Turma Padrao",
+        email,
+        papel,
+        instituicao
+      };
+    }
+    const [nome, turma, email, papel, instituicao] = parts;
     return {
       nome,
       turma: turma || "Turma Padrao",
@@ -284,6 +297,73 @@ function parseImportRows(rawInput) {
       instituicao
     };
   });
+}
+
+function invitationEmailBody({ email, turma, link }) {
+  return [
+    "Olá,",
+    "",
+    `Você recebeu um convite individual para acessar sua cabine MailFlow Intelligence${turma ? ` da ${turma}` : ""}.`,
+    "",
+    `Acesse aqui: ${link}`,
+    "",
+    "Ao abrir o link, você será levado direto para o composer. Depois, conecte seu Gmail para liberar as explorações da caixa de entrada.",
+    "",
+    `Este convite foi gerado para ${email}. Não compartilhe este link com outras pessoas.`
+  ].join("\n");
+}
+
+async function resolveInviteSender(req) {
+  if (process.env.INVITE_SENDER_USER_ID) {
+    return getUserById(process.env.INVITE_SENDER_USER_ID);
+  }
+  return getSessionUser(req);
+}
+
+async function sendInviteEmails(req, createdRows) {
+  const sender = await resolveInviteSender(req);
+  if (!sender) {
+    return {
+      senderEmail: "",
+      deliveries: createdRows.map((item) => ({
+        email: item.email,
+        status: "not_sent",
+        error: "Nenhum Gmail remetente conectado nesta sessao."
+      }))
+    };
+  }
+
+  const gmail = await getGmailConnectionStatus(sender.user_id);
+  if (!gmail?.operational) {
+    return {
+      senderEmail: gmail?.googleEmail || "",
+      deliveries: createdRows.map((item) => ({
+        email: item.email,
+        status: "not_sent",
+        error: "Gmail remetente sem permissao de envio. Reconecte o Gmail."
+      }))
+    };
+  }
+
+  const deliveries = [];
+  for (const item of createdRows) {
+    try {
+      await sendPlainEmail(sender.user_id, {
+        to: item.email,
+        subject: `Seu convite para o MailFlow Intelligence - ${item.turma}`,
+        body: invitationEmailBody({
+          email: item.email,
+          turma: item.turma,
+          link: inviteLink(req, item.invite_id)
+        })
+      });
+      deliveries.push({ email: item.email, status: "sent", error: "" });
+    } catch (error) {
+      deliveries.push({ email: item.email, status: "error", error: error.message });
+    }
+  }
+
+  return { senderEmail: gmail.googleEmail, deliveries };
 }
 
 function serializePendingAction(action) {
@@ -735,10 +815,34 @@ function inboxQueryFromUrl(url) {
   if (explicit) return explicit;
   const timeframe = url.searchParams.get("timeframe") || "30d";
   const daysMatch = String(timeframe).match(/^(\d{1,3})d$/);
-  if (daysMatch) return `newer_than:${Math.min(365, Math.max(1, Number(daysMatch[1])))}d -category:social`;
-  if (timeframe === "24h") return "newer_than:1d -category:social";
-  if (timeframe === "90d") return "newer_than:90d -category:social";
-  return "newer_than:30d -category:social";
+  const days = daysMatch ? Math.min(365, Math.max(1, Number(daysMatch[1]))) : timeframe === "24h" ? 1 : 30;
+  return `${categoryQueryFromUrl(url)} newer_than:${days}d`.trim();
+}
+
+function selectedInboxCategories(url) {
+  const allowed = new Set(["primary", "social", "promotions"]);
+  const requested = String(url.searchParams.get("categories") || "primary")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => allowed.has(item));
+  return requested.length ? requested : ["primary"];
+}
+
+function categoryQueryFromUrl(url) {
+  const categories = selectedInboxCategories(url);
+  const hasPrimary = categories.includes("primary");
+  const hasSocial = categories.includes("social");
+  const hasPromotions = categories.includes("promotions");
+
+  if (hasPrimary && hasSocial && hasPromotions) return "";
+  if (hasPrimary && !hasSocial && !hasPromotions) return "-category:social -category:promotions";
+  if (!hasPrimary && hasSocial && !hasPromotions) return "category:social";
+  if (!hasPrimary && !hasSocial && hasPromotions) return "category:promotions";
+
+  // Gmail search does not reliably support OR groups with negative category terms.
+  // When Principal is combined with another category, use a broad window and let ranking filter.
+  if (hasPrimary) return hasPromotions && !hasSocial ? "-category:social" : hasSocial && !hasPromotions ? "-category:promotions" : "";
+  return "{category:social category:promotions}";
 }
 
 function clampInboxLimit(value) {
@@ -1113,7 +1217,8 @@ async function router(req, res) {
         question: body.question || "",
         timeframe: body.timeframe || "30d",
         query: body.query || "",
-        maxResults: body.maxResults || 40
+        maxResults: body.maxResults || 40,
+        categories: body.categories || ["primary"]
       });
       await logAction({
         userId: user.user_id,
@@ -1143,12 +1248,21 @@ async function router(req, res) {
     const body = await readBody(req);
     const rows = Array.isArray(body.students) ? body.students : parseImportRows(body.raw || "");
     const createdRows = await importStudents(rows);
+    const deliveryReport = body.sendEmails === false
+      ? { senderEmail: "", deliveries: [] }
+      : await sendInviteEmails(req, createdRows);
+    const deliveryByEmail = new Map(
+      deliveryReport.deliveries.map((item) => [item.email, item])
+    );
     return sendJson(res, 200, {
       ok: true,
+      senderEmail: deliveryReport.senderEmail,
       created: createdRows.map((item) => ({
         nome: item.nome,
+        email: item.email,
         turma: item.turma,
-        link: inviteLink(req, item.invite_id)
+        link: inviteLink(req, item.invite_id),
+        delivery: deliveryByEmail.get(item.email) || { status: "not_requested", error: "" }
       }))
     });
   }

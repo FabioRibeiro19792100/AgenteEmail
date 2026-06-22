@@ -226,14 +226,15 @@ export async function getOrCreateTurmaByName(nome) {
 export async function importStudents(rows) {
   const created = [];
   for (const row of rows) {
-    if (!row?.nome || !row?.turma) continue;
+    if (!row?.email || !row?.turma) continue;
     const turma = await getOrCreateTurmaByName(row.turma);
     const userId = generateId("user");
     const inviteId = generateId("inv");
+    const nome = row.nome || row.email.split("@")[0] || row.email;
     await insertRows("users", [
       {
         user_id: userId,
-        nome: row.nome,
+        nome,
         turma_id: turma.turma_id,
         email_informado: row.email || "",
         papel: row.papel || "aluno",
@@ -253,7 +254,7 @@ export async function importStudents(rows) {
         last_access_at: null
       }
     ]);
-    created.push({ nome: row.nome, turma: row.turma, invite_id: inviteId });
+    created.push({ nome, email: row.email, turma: row.turma, invite_id: inviteId });
   }
   return created;
 }

@@ -201,7 +201,14 @@ function normalizeQuery(message) {
 }
 
 function emailText(email) {
-  return `${email.subject}\n${email.from}\n${email.snippet}\n${email.bodyPreview}`;
+  return `${email.subject}\n${email.from}\n${email.to || ""}\n${email.snippet}\n${email.bodyPreview}`;
+}
+
+function emailDirection(email) {
+  const labels = Array.isArray(email.labelIds) ? email.labelIds : [];
+  if (labels.includes("SENT")) return "enviado";
+  if (labels.includes("DRAFT")) return "rascunho";
+  return "recebido";
 }
 
 function classifyEmail(email) {
@@ -265,8 +272,13 @@ function scoreEmailForQuestion(email, userMessage, analysis) {
   }
 
   if (kind === "pendencia") {
-    score += analysis.focus === "pending" ? 12 : 4;
-    reasons.push("sinais de pendencia");
+    if (emailDirection(email) === "enviado") {
+      score += analysis.focus === "pending" ? 3 : 1;
+      reasons.push("pendencia mencionada em email enviado");
+    } else {
+      score += analysis.focus === "pending" ? 12 : 4;
+      reasons.push("sinais de pendencia recebida");
+    }
   }
 
   if (kind === "agenda") {
@@ -283,9 +295,9 @@ function scoreEmailForQuestion(email, userMessage, analysis) {
     score -= 8;
   }
 
-  if (analysis.wantsAction && includesAny(haystack, PENDING_TERMS)) {
+  if (analysis.wantsAction && includesAny(haystack, PENDING_TERMS) && emailDirection(email) !== "enviado") {
     score += 6;
-    reasons.push("pode exigir acao");
+    reasons.push("pode exigir acao sua");
   }
 
   if (
@@ -442,7 +454,51 @@ function hasDateFilter(query = "") {
   return /\b(newer_than|older_than|after|before):/i.test(query);
 }
 
-function buildInsightQueryPlan({ question, timeframe = "30d", query = "", maxResults = DEFAULT_INSIGHT_SCAN_RESULTS }) {
+function hasCategoryFilter(query = "") {
+  return /\b-?category:/i.test(query);
+}
+
+function normalizeCategories(categories = ["primary"]) {
+  const allowed = new Set(["primary", "social", "promotions"]);
+  const values = Array.isArray(categories)
+    ? categories
+    : String(categories || "").split(",");
+  const normalized = values
+    .map((item) => String(item || "").trim().toLowerCase())
+    .filter((item) => allowed.has(item));
+  return normalized.length ? normalized : ["primary"];
+}
+
+function categoryQuery(categories = ["primary"]) {
+  const normalized = normalizeCategories(categories);
+  const hasPrimary = normalized.includes("primary");
+  const hasSocial = normalized.includes("social");
+  const hasPromotions = normalized.includes("promotions");
+
+  if (hasPrimary && hasSocial && hasPromotions) return "";
+  if (hasPrimary && !hasSocial && !hasPromotions) return "-category:social -category:promotions";
+  if (!hasPrimary && hasSocial && !hasPromotions) return "category:social";
+  if (!hasPrimary && !hasSocial && hasPromotions) return "category:promotions";
+
+  // Gmail search is brittle with OR groups that include negative category terms.
+  // Prefer a slightly broader query over returning zero messages.
+  if (hasPrimary) return hasPromotions && !hasSocial ? "-category:social" : hasSocial && !hasPromotions ? "-category:promotions" : "";
+  return "{category:social category:promotions}";
+}
+
+function scopedInsightQuery(base, query = "", categories = ["primary"]) {
+  const trimmed = String(query || "").trim();
+  const parts = [];
+  if (!hasDateFilter(trimmed)) parts.push(base);
+  if (!hasCategoryFilter(trimmed)) {
+    const categoryScope = categoryQuery(categories);
+    if (categoryScope) parts.push(categoryScope);
+  }
+  if (trimmed) parts.push(trimmed);
+  return parts.join(" ").trim();
+}
+
+function buildInsightQueryPlan({ question, timeframe = "30d", query = "", maxResults = DEFAULT_INSIGHT_SCAN_RESULTS, categories = ["primary"] }) {
   const baseAnalysis = analyzeRequest(`${question} ${query}`);
   const analysis = {
     ...baseAnalysis,
@@ -451,37 +507,33 @@ function buildInsightQueryPlan({ question, timeframe = "30d", query = "", maxRes
   const base = windowQuery(analysis.days);
   const queries = [];
   const explicitQuery = String(query || "").trim();
+  const selectedCategories = normalizeCategories(categories);
 
   if (explicitQuery) {
-    addQuery(
-      queries,
-      hasDateFilter(explicitQuery)
-        ? explicitQuery
-        : `${base} ${explicitQuery} -category:social -category:promotions`
-    );
+    addQuery(queries, scopedInsightQuery(base, explicitQuery, selectedCategories));
   }
 
   if (analysis.focus === "commercial") {
     for (const term of ["cliente", "proposta", "contrato", "orcamento", "pagamento", "parceria", "renovacao"]) {
-      addQuery(queries, `${base} ${term} -category:social -category:promotions`);
+      addQuery(queries, scopedInsightQuery(base, term, selectedCategories));
     }
   } else if (analysis.focus === "pending") {
     for (const term of ["responder", "retorno", "aprovar", "confirmar", "urgente", "pendente"]) {
-      addQuery(queries, `${base} ${term} -category:social -category:promotions`);
+      addQuery(queries, scopedInsightQuery(base, term, selectedCategories));
     }
-    addQuery(queries, `${base} is:unread -category:social -category:promotions`);
+    addQuery(queries, scopedInsightQuery(base, "is:unread", selectedCategories));
   } else if (analysis.focus === "schedule") {
     for (const term of ["reuniao", "reunião", "agenda", "meeting", "evento"]) {
-      addQuery(queries, `${base} ${term} -category:social -category:promotions`);
+      addQuery(queries, scopedInsightQuery(base, term, selectedCategories));
     }
   }
 
-  addQuery(queries, `${base} is:important -category:social -category:promotions`);
-  addQuery(queries, `${base} -category:social -category:promotions`);
-  addQuery(queries, `${base} in:sent -category:social -category:promotions`);
+  addQuery(queries, scopedInsightQuery(base, "is:important", selectedCategories));
+  addQuery(queries, scopedInsightQuery(base, "", selectedCategories));
 
   return {
     analysis,
+    categories: selectedCategories,
     queries: queries.slice(0, 10),
     perQueryLimit: Math.min(
       MAX_INSIGHT_RESULTS_PER_QUERY,
@@ -494,10 +546,12 @@ function buildInsightPrompt({ question, context }) {
   const evidence = context.emails.map((email, index) => ({
     index: index + 1,
     type: email._kind || classifyEmail(email),
+    direction: emailDirection(email),
     relevanceScore: email._score,
     whySelected: email._reasons || [],
     subject: email.subject,
     from: email.from,
+    to: email.to || "",
     date: email.date,
     snippet: email.snippet,
     bodyPreview: email.bodyPreview
@@ -512,7 +566,7 @@ function buildInsightPrompt({ question, context }) {
           {
             type: "input_text",
             text:
-              "Voce e um analista de inteligencia pessoal sobre a caixa de email do proprio usuario. Sua funcao nao e resumir emails soltos; e extrair insights acionaveis, padroes, riscos, oportunidades, lacunas e proximos passos. Use somente as evidencias fornecidas. Nao invente fatos, nomes, valores ou prazos. Se a evidencia for fraca, diga claramente. Responda em portugues do Brasil. Retorne somente JSON valido, sem markdown."
+              "Voce e um analista de inteligencia pessoal sobre a caixa de email do proprio usuario. Sua funcao nao e resumir emails soltos; e extrair insights acionaveis, padroes, riscos, oportunidades, lacunas e proximos passos. Use somente as evidencias fornecidas. Nao invente fatos, nomes, valores ou prazos. Se a evidencia for fraca, diga claramente. Responda em portugues do Brasil. Para cada insight, classifique operationalType e recomende somente acoes existentes no produto: generate_note, prepare_reply, apply_label, mark_read, archive. Se a melhor acao for organizar informacao, use generate_note com preview estruturado. So use prepare_reply quando houver conversa humana que realmente peca resposta. Nao prometa calendario externo, tarefas externas, WhatsApp, planilhas ou automacoes que nao existem. Retorne somente JSON valido, sem markdown."
           }
         ]
       },
@@ -527,6 +581,17 @@ function buildInsightPrompt({ question, context }) {
               `Janela analisada: ultimos ${context.analysis.days} dias`,
               `Emails escaneados antes do ranking: ${context.totalScanned}`,
               `Evidencias enviadas para analise: ${context.emails.length}`,
+              "Direcao das evidencias: recebido significa email recebido pelo usuario; enviado significa email que o usuario mandou. Nunca trate email enviado pelo usuario como cobranca recebida ou tarefa pedida ao usuario, a menos que a propria pergunta peça promessas/itens enviados pelo usuario.",
+              "",
+              "Regras para operationalType e recommendedActions:",
+              "- conta_a_pagar: primeira acao generate_note com label como Criar pendencia; depois apply_label ou mark_read.",
+              "- pagamento_quitado: primeira acao generate_note com label como Registrar quitado; nao use prepare_reply.",
+              "- resposta_necessaria: primeira acao prepare_reply.",
+              "- oportunidade_comercial: generate_note para briefing e prepare_reply se houver contato humano.",
+              "- negociacao_contrato: generate_note para briefing de negociacao e prepare_reply se houver decisao/resposta humana.",
+              "- newsletter_ruido: archive ou apply_label; nao use generate_note como principal.",
+              "- documento_para_organizar/informacao_para_salvar: generate_note.",
+              "A frase offer deve bater exatamente com o primeiro botao recomendado.",
               "",
               "Consultas usadas no Gmail:",
               JSON.stringify(context.queryPlan, null, 2),
@@ -542,11 +607,20 @@ function buildInsightPrompt({ question, context }) {
                   insights: [
                     {
                       type: "oportunidade | risco | padrao | pendencia | ruido | pergunta_aberta",
+                      operationalType: "conta_a_pagar | pagamento_quitado | resposta_necessaria | oportunidade_comercial | reuniao_agenda | documento_para_organizar | newsletter_ruido | promessa_recebida | promessa_feita_por_mim | risco_futuro | contato_importante | informacao_para_salvar | negociacao_contrato",
                       title: "Titulo curto do insight",
                       claim: "O que parece estar acontecendo.",
                       whyItMatters: "Por que isso importa para o usuario.",
-                      nextAction: "Proxima acao concreta sugerida.",
-                      agentOffer: "Frase curta em primeira pessoa oferecendo ajuda concreta. Comece com: Quer que eu...",
+                      nextAction: "Proxima acao concreta coerente com operationalType.",
+                      recommendedActions: [
+                        {
+                          kind: "generate_note | prepare_reply | apply_label | mark_read | archive",
+                          label: "Texto curto do botao",
+                          offer: "Frase curta do agente que bate exatamente com o botao principal.",
+                          labelValue: "Nome da label, se kind for apply_label.",
+                          preview: "Conteudo inicial estruturado, se kind for generate_note ou prepare_reply."
+                        }
+                      ],
                       evidenceIndexes: [1],
                       confidence: "alta | media | baixa"
                     }
@@ -589,11 +663,24 @@ function fallbackInsightResponse(question, context, rawText = "") {
     confidence: "baixa",
     insights: top.map((email, index) => ({
       type: email._kind === "comercial" ? "oportunidade" : email._kind === "pendencia" ? "pendencia" : "padrao",
+      operationalType: email._kind === "comercial" ? "oportunidade_comercial" : email._kind === "pendencia" ? "resposta_necessaria" : "informacao_para_salvar",
       title: email.subject,
       claim: `Evidencia encontrada de ${email.from}.`,
       whyItMatters: (email._reasons || []).join(", ") || "Foi ranqueado como relevante para a pergunta.",
-      nextAction: "Abrir a evidencia e pedir uma analise mais especifica ou preparar resposta.",
-      agentOffer: "Quer que eu abra essa evidência e prepare um próximo passo para você?",
+      nextAction: "Gerar uma nota organizada para revisar a evidencia antes de agir.",
+      recommendedActions: [
+        {
+          kind: "generate_note",
+          label: "Gerar nota",
+          offer: "Quer que eu gere uma nota organizada com esta evidência?",
+          preview: `# Nota organizada\n\nAssunto: ${email.subject}\nRemetente: ${email.from}\nData: ${email.date}\n\n${email.snippet || email.bodyPreview || ""}`
+        },
+        {
+          kind: "apply_label",
+          label: "Aplicar label",
+          labelValue: "MailFlow/Revisar"
+        }
+      ],
       evidenceIndexes: [index + 1],
       confidence: "baixa"
     })),
@@ -692,7 +779,8 @@ export async function runInsightAnalysis(userId, options = {}) {
     question,
     timeframe: options.timeframe || "30d",
     query: options.query || "",
-    maxResults
+    maxResults,
+    categories: options.categories || ["primary"]
   });
   const collected = await searchWithPlan(userId, plan);
   const ranked = rankEmails(collected.emails, `${question} ${options.query || ""}`, plan.analysis);
@@ -720,6 +808,7 @@ export async function runInsightAnalysis(userId, options = {}) {
     coverage: {
       timeframe: options.timeframe || "30d",
       days: plan.analysis.days,
+      categories: plan.categories,
       scanned: collected.emails.length,
       evidenceCount: emails.length,
       failures: collected.failures
@@ -729,6 +818,7 @@ export async function runInsightAnalysis(userId, options = {}) {
       index: index + 1,
       id: email.id,
       kind: email._kind || classifyEmail(email),
+      direction: emailDirection(email),
       score: email._score,
       reasons: email._reasons || [],
       subject: email.subject,
