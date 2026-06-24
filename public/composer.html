@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MailFlow Intelligence</title>
-    <link rel="stylesheet" href="/assets/mailflow.css?v=30" />
+    <link rel="stylesheet" href="/assets/mailflow.css?v=31" />
   </head>
   <body>
     <div id="toast" class="mf-toast" hidden></div>
@@ -19,37 +19,18 @@
           </div>
         </div>
 
+        <nav class="mf-scenario-switch" aria-label="Escolher cenário">
+          <span>Cenário</span>
+          <a class="is-active" href="/composer">Explorações</a>
+          <a href="/executive">Executivo</a>
+        </nav>
+
         <div class="mf-section-kicker">
           <span>Explorações</span>
           <p>Escolha um modo de investigação.</p>
         </div>
 
         <nav id="modeList" class="mf-mode-list" aria-label="Explorações de email"></nav>
-
-        <div class="mf-section-kicker mf-report-kicker">
-          <span>REPORT ME</span>
-        </div>
-
-        <section id="weeklyReportBox" class="mf-sidebar-report" aria-label="Relatório semanal por WhatsApp">
-          <span class="mf-wa-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M20 11.5a8 8 0 0 1-11.8 7L4 20l1.5-4.1A8 8 0 1 1 20 11.5Z"></path>
-              <path d="M9.5 8.5c.3 2.7 2 4.4 4 5l1.2-1.1 1.8.7c-.2 1.2-1 2-2.2 2-3.6 0-6.6-3-6.6-6.6 0-1.2.8-2 2-2.2l.7 1.8-.9.4Z"></path>
-            </svg>
-          </span>
-          <input id="weeklyWhatsapp" type="tel" inputmode="tel" placeholder="+55..." aria-label="WhatsApp" />
-          <select id="weeklyDay" aria-label="Dia da semana">
-            <option value="monday">Seg</option>
-            <option value="tuesday">Ter</option>
-            <option value="wednesday">Qua</option>
-            <option value="thursday">Qui</option>
-            <option value="friday">Sex</option>
-            <option value="saturday">Sáb</option>
-            <option value="sunday">Dom</option>
-          </select>
-          <input id="weeklyTime" type="text" inputmode="numeric" maxlength="5" value="09:00" aria-label="Horário BRT" />
-          <button id="saveReportSettingsBtn" class="mf-sidebar-report-save" type="button" aria-label="Salvar agenda semanal">✓</button>
-        </section>
 
         <div class="mf-sidebar-footer">
           <div class="mf-account">
@@ -120,7 +101,16 @@
           </div>
         </header>
 
+        <section class="mf-workflow" aria-label="Fluxo do agente">
+          <div class="mf-workflow-head">Fluxo do agente</div>
+          <div id="workflowSteps" class="mf-workflow-steps"></div>
+        </section>
+
         <section id="metricsGrid" class="mf-metrics" aria-label="Dados estatísticos de emails rastreados"></section>
+
+        <section id="workflowGuidance" class="mf-guidance">
+          Conecte o Gmail e sincronize os emails para começar. O agente vai identificar automatizar ações relevantes com base no seu inbox.
+        </section>
 
         <section class="mf-workspace">
           <div class="mf-info-box">
@@ -137,12 +127,24 @@
             </button>
           </div>
 
+          <div id="pendingActionsSummary" class="mf-pending-summary" hidden>
+            <strong>Você tem 0 ações pendentes</strong>
+            <p>As ações salvas aparecem abaixo para confirmar, cancelar ou copiar quando estiver pronto.</p>
+          </div>
+
           <div class="mf-conclusion">
             <span id="conclusionLabel" class="mf-conclusion-label">Conclusão da exploração</span>
             <div id="resultPanel" class="mf-empty">
               Clique em "Rodar esta exploração" ou em uma pergunta pronta para analisar seus emails reais.
             </div>
           </div>
+
+          <section id="pendingActionsPanel" class="mf-pending-actions" hidden>
+            <div class="mf-pending-head">
+              <span>Ações aguardando confirmação</span>
+            </div>
+            <div id="pendingActionsList" class="mf-pending-list"></div>
+          </section>
         </section>
       </main>
 
@@ -161,13 +163,6 @@
           </div>
           <div id="quickQuestions" class="mf-chip-row"></div>
         </div>
-
-        <section id="pendingActionsPanel" class="mf-pending-actions" hidden>
-          <div class="mf-pending-head">
-            <span>Ações aguardando confirmação</span>
-          </div>
-          <div id="pendingActionsList" class="mf-pending-list"></div>
-        </section>
 
         <div id="chatMessages" class="mf-chat-messages"></div>
 
@@ -622,10 +617,12 @@
 
       function setFieldValue(id, value) {
         const node = el(id);
+        if (!node) return;
         if (document.activeElement !== node) node.value = value;
       }
 
       function renderReportSettings() {
+        if (!el("weeklyReportBox")) return;
         const settings = state.reportSettings;
         setFieldValue("weeklyWhatsapp", settings.whatsappNumber || "");
         setFieldValue("weeklyDay", settings.scheduleDay || "friday");
@@ -656,6 +653,50 @@
           result.blindSpots.slice(0, 3).forEach((item) => lines.push(`- ${item}`));
         }
         return lines.join("\n");
+      }
+
+      function insightBadgeForItem(item) {
+        const profile = insightActionProfile(item);
+        const labels = {
+          reply: "Resposta necessária",
+          paid: "Pagamento quitado",
+          payable: "Pendência de pagamento",
+          opportunity: "Oportunidade",
+          negotiation: "Negociação",
+          noise: "Ruído",
+          note: "Nota"
+        };
+        return labels[profile] || String(item?.type || "Achado").replace(/_/g, " ");
+      }
+
+      function insightBadgeClass(item) {
+        const profile = insightActionProfile(item);
+        return `mf-finding-badge-${profile}`;
+      }
+
+      function renderInsightOverview(result) {
+        if (!result) return "";
+        const summaryText = result.summary || "Sem conclusão clara.";
+        const primaryInsight = Array.isArray(result.insights) && result.insights.length ? result.insights[0] : null;
+        const whyText = primaryInsight?.whyItMatters || "O agente extraiu o ponto mais relevante do seu inbox para priorizar ações.";
+        const nextStep = primaryInsight ? agentOfferForInsight(primaryInsight) : "Revise os achados e escolha a ação mais relevante.";
+
+        return `
+          <section class="mf-insight-summary">
+            <div class="mf-summary-block">
+              <span>O que o agente encontrou</span>
+              <p>${escapeHtml(summaryText)}</p>
+            </div>
+            <div class="mf-summary-block">
+              <span>Por que isso importa</span>
+              <p>${escapeHtml(whyText)}</p>
+            </div>
+            <div class="mf-summary-block">
+              <span>O que você pode fazer</span>
+              <p>${escapeHtml(nextStep)}</p>
+            </div>
+          </section>
+        `;
       }
 
       function agentOfferForInsight(item) {
@@ -915,18 +956,51 @@
                 const source = sourceForInsight(result, item);
                 const messageId = source?.id || "";
                 const actions = actionsForInsight(item);
-                const executableActions = actions.filter((action) => action.action === "note" || messageId);
+                const validActions = actions.filter((action) => {
+                  const needsEmail = action.action !== "note";
+                  return !needsEmail || Boolean(messageId);
+                });
+                const actionButtons = validActions.map((action, actionIndex) => `
+                  <button type="button"
+                    class="mf-finding-action-button"
+                    data-finding-action="${escapeHtml(action.action)}"
+                    data-message-id="${escapeHtml(messageId)}"
+                    data-insight-index="${index}"
+                    data-action-index="${actionIndex}"
+                  >${escapeHtml(action.label)}</button>
+                `).join("");
                 const artifact = state.findingArtifacts[index];
                 const evidences = Array.isArray(item.evidenceIndexes) && item.evidenceIndexes.length
                   ? `Evidências: ${item.evidenceIndexes.slice(0, 4).map((evidenceIndex) => `#${evidenceIndex}`).join(", ")}`
                   : "Evidência ranqueada pelo Gmail";
+                const badge = insightBadgeForItem(item);
+                const badgeClass = insightBadgeClass(item);
                 return `
                   <article class="mf-finding-card">
                     <div class="mf-finding-meta">
-                      <span>Achado ${index + 1}</span>
+                      <span class="mf-finding-badge ${badgeClass}">${escapeHtml(badge)}</span>
                       <small>${escapeHtml(type)}${escapeHtml(confidence)}${operation ? ` • ${escapeHtml(operation)}` : ""}</small>
                     </div>
                     <h4>${escapeHtml(item.title || "Insight")}</h4>
+                    ${source ? `
+                      <section class="mf-finding-source-card">
+                        <div class="mf-finding-source-card-header">
+                          <span>Email fonte</span>
+                          <small>${escapeHtml(source.direction || "recebido")} • #${escapeHtml(String(source.index || ""))}</small>
+                        </div>
+                        <strong>${escapeHtml(source.subject || "Sem assunto")}</strong>
+                        <div class="mf-finding-source-card-meta">
+                          <span>${escapeHtml(source.from || "Remetente desconhecido")}</span>
+                          <span>${escapeHtml(source.date || "Sem data")}</span>
+                        </div>
+                        <p>${escapeHtml(source.snippet || "Sem prévia disponível.")}</p>
+                      </section>
+                    ` : `
+                      <div class="mf-finding-source-card mf-finding-source-card-empty">
+                        <span>Sem email de referência disponível</span>
+                        <p>Este insight não tem um email atrelado. Tente outra análise ou ajuste o filtro.</p>
+                      </div>
+                    `}
                     <p>${escapeHtml(item.claim || "Sem descrição clara para este achado.")}</p>
                     ${item.whyItMatters ? `<p class="mf-finding-why">${escapeHtml(item.whyItMatters)}</p>` : ""}
                     <small class="mf-finding-evidence">${escapeHtml(evidences)}</small>
@@ -934,14 +1008,12 @@
                       <span>Agente</span>
                       <strong>${escapeHtml(agentOfferForInsight(item))}</strong>
                     </div>
-                    ${executableActions.length ? `
+                    ${actionButtons ? `
                       <div class="mf-finding-actions">
-                        ${executableActions.map((action, actionIndex) => `
-                          <button type="button" data-finding-action="${escapeHtml(action.action)}" data-message-id="${escapeHtml(messageId)}" data-insight-index="${index}" data-action-index="${actionIndex}">${escapeHtml(action.label)}</button>
-                        `).join("")}
+                        ${actionButtons}
                       </div>
                     ` : `
-                      <small class="mf-finding-no-action">Sem email alvo suficiente para executar ação.</small>
+                      <small class="mf-finding-no-action">Sem ações sugeridas para este achado.</small>
                     `}
                     ${artifact ? `
                       <div class="mf-inline-artifact">
@@ -1153,7 +1225,7 @@
           ? `Conclusão • Confiança ${confidence.charAt(0).toUpperCase()}${confidence.slice(1)}`
           : "Conclusão da exploração";
         el("resultPanel").className = "mf-summary-card";
-        el("resultPanel").innerHTML = `${markdownToHtml(insightNarrative(state.latestInsight))}${renderFindings(state.latestInsight)}${renderSources(state.latestInsight)}`;
+        el("resultPanel").innerHTML = `${renderInsightOverview(state.latestInsight)}${renderFindings(state.latestInsight)}${renderSources(state.latestInsight)}`;
       }
 
       function renderChat() {
@@ -1189,7 +1261,17 @@
 
       function renderPendingActions() {
         const pending = Array.isArray(state.pendingActions) ? state.pendingActions : [];
-        el("pendingActionsPanel").hidden = pending.length === 0;
+        const summaryEl = el("pendingActionsSummary");
+        const hasPending = pending.length > 0;
+
+        if (summaryEl) {
+          summaryEl.hidden = !hasPending;
+          summaryEl.innerHTML = hasPending
+            ? `<strong>${pending.length} ação${pending.length === 1 ? "" : "s"} pendente${pending.length === 1 ? "" : "s"}</strong><p>Reveja estas ações salvas e confirme ou cancele quando quiser executar ou copiar.</p>`
+            : "";
+        }
+
+        el("pendingActionsPanel").hidden = !hasPending;
         el("pendingActionsList").innerHTML = pending.map((action) => `
           <article class="mf-pending-card">
             <div>
@@ -1209,10 +1291,50 @@
         `).join("");
       }
 
+      function renderWorkflowSteps() {
+        const connected = Boolean(state.session?.connections?.gmailConnected);
+        const inboxReady = connected && Array.isArray(state.inbox) && state.inbox.length > 0 && !state.loadingInbox;
+        const analyzed = Boolean(state.latestInsight);
+        const hasPending = Array.isArray(state.pendingActions) && state.pendingActions.length > 0;
+
+        const steps = [
+          { label: "Conectar Gmail", status: connected ? "done" : "active" },
+          { label: "Sincronizar emails", status: connected ? (inboxReady ? "done" : "active") : "todo" },
+          { label: "Analisar inbox", status: analyzed ? "done" : connected ? "active" : "todo" },
+          { label: "Confirmar ação", status: hasPending ? "active" : "todo" }
+        ];
+
+        const node = el("workflowSteps");
+        if (node) {
+          node.innerHTML = steps.map((step, index) => `
+            <div class="mf-workflow-step ${step.status === "active" ? "is-active" : step.status === "done" ? "is-done" : ""}">
+              <span class="mf-workflow-step-icon">${index + 1}</span>
+              <span>${escapeHtml(step.label)}</span>
+            </div>
+          `).join("");
+        }
+
+        const guidance = el("workflowGuidance");
+        if (guidance) {
+          if (!connected) {
+            guidance.textContent = "Conecte o Gmail para ativar o agente e permitir a análise dos emails.";
+          } else if (state.loadingInbox) {
+            guidance.textContent = "Sincronizando seus emails. Aguarde enquanto o agente lê e organiza o inbox.";
+          } else if (!state.latestInsight) {
+            guidance.textContent = "Seu Gmail está conectado. Use o botão Rodar esta exploração para gerar achados e sugestões de ação.";
+          } else if (hasPending) {
+            guidance.textContent = "Exploração concluída. Revise os achados, confirme ou cancele ações pendentes para finalizar o workflow.";
+          } else {
+            guidance.textContent = "Exploração concluída. Escolha um achado para preparar uma resposta, nota ou outra ação inteligente.";
+          }
+        }
+      }
+
       function renderAll() {
         renderModes();
         renderHeader();
         renderMetrics();
+        renderWorkflowSteps();
         renderReportSettings();
         renderQuestions();
         renderResult();
@@ -1246,6 +1368,7 @@
       }
 
       async function loadReportSettings() {
+        if (!el("weeklyReportBox")) return;
         try {
           const data = await api("/api/weekly-report/settings");
           state.reportSettings = {
@@ -1260,6 +1383,7 @@
       }
 
       function readReportSettingsForm() {
+        if (!el("weeklyReportBox")) return { whatsappNumber: "", scheduleDay: "friday", scheduleTime: "09:00", timezoneLabel: "BRT", enabled: false };
         return {
           whatsappNumber: el("weeklyWhatsapp").value.trim(),
           scheduleDay: el("weeklyDay").value || "friday",
@@ -1270,6 +1394,7 @@
       }
 
       async function saveReportSettings() {
+        if (!el("weeklyReportBox")) return;
         const settings = readReportSettingsForm();
         if (settings.whatsappNumber && settings.whatsappNumber.replace(/\D/g, "").length < 10) {
           toast("Informe um WhatsApp com DDI e DDD.");
@@ -1347,10 +1472,20 @@
       }
 
       async function prepareFindingAction(actionType, messageId, insightIndex, actionIndex = 0) {
-        if ((!messageId && actionType !== "note") || state.actionBusy) return;
+        if (state.actionBusy) {
+          toast("Aguarde a ação atual terminar antes de iniciar outra.");
+          return;
+        }
+
         const insight = state.latestInsight?.insights?.[Number(insightIndex)] || {};
         const source = sourceForInsight(state.latestInsight, insight);
         const selectedAction = actionsForInsight(insight)[Number(actionIndex)] || actionsForInsight(insight)[0] || {};
+
+        if (actionType !== "note" && !messageId) {
+          toast("Não há email de referência disponível para esta ação. Escolha outro achado ou reveja as evidências.");
+          return;
+        }
+
         if (actionType === "note") {
           const index = Number(insightIndex);
           state.findingArtifacts = {
@@ -1524,9 +1659,9 @@
 
       el("syncBtn").onclick = syncGmailNow;
       el("runBtn").onclick = () => runQuestion(activeMode().quickQuestions[0], { asChat: false });
-      el("saveReportSettingsBtn").onclick = saveReportSettings;
+      if (el("saveReportSettingsBtn")) el("saveReportSettingsBtn").onclick = saveReportSettings;
       el("connectBtn").onclick = () => {
-        location.href = "/api/google/gmail/start";
+        location.href = "/api/google/gmail/start?returnTo=/composer";
       };
       el("logoutBtn").onclick = async () => {
         await api("/api/logout", { method: "POST", body: "{}" });

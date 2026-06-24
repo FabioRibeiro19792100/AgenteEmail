@@ -83,6 +83,22 @@ create table if not exists pending_actions (
   execution_result jsonb
 );
 
+create table if not exists operational_notes (
+  id text primary key,
+  user_id text not null references users(user_id) on delete cascade,
+  turma_id text not null references turmas(turma_id),
+  agent_id text,
+  type text not null,
+  title text not null,
+  summary text not null,
+  next_action text,
+  evidence_indexes jsonb not null default '[]'::jsonb,
+  sources jsonb not null default '[]'::jsonb,
+  status text not null default 'open',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists weekly_report_settings (
   user_id text primary key references users(user_id) on delete cascade,
   whatsapp_number text not null default '',

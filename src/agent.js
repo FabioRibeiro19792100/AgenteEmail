@@ -5,6 +5,49 @@ const MAX_INSIGHT_SCAN_RESULTS = 500;
 const MAX_INSIGHT_EVIDENCE = 80;
 const MAX_INSIGHT_RESULTS_PER_QUERY = 200;
 
+const EXECUTIVE_AGENT_PROFILES = {
+  executive_assistant: {
+    id: "executive_assistant",
+    name: "Personal Executive Assistant",
+    shortName: "Briefing Diario",
+    description: "Triage de alto nivel com prioridades, riscos, oportunidades e acoes recomendadas.",
+    systemPrompt:
+      "Voce e um Executive Assistant de alto nivel, extremamente direto, organizado e proativo. Sua funcao e fazer triage completo da caixa de entrada e entregar valor maximo em pouco tempo.",
+    defaultQuestion: "Faca um briefing executivo com critico, importante, baixa prioridade, oportunidades, riscos e acoes recomendadas.",
+    queryTerms: ["urgente", "responder", "retorno", "aprovar", "confirmar", "proposta", "contrato", "pagamento", "reuniao"]
+  },
+  followup_crm: {
+    id: "followup_crm",
+    name: "Follow-up Inteligente + CRM Light",
+    shortName: "CRM Light",
+    description: "Mapeia pendencias, cobrancas, relacionamentos quentes/frios e follow-ups sugeridos.",
+    systemPrompt:
+      "Voce e um especialista em gestao de relacionamentos e follow-up. Sua funcao e identificar pendencias ativas, cobrancas recebidas, relacionamentos mapeados e sugestoes de proatividade.",
+    defaultQuestion: "Analise follow-ups, pendencias ativas, cobrancas recebidas, relacionamentos e rascunhos sugeridos.",
+    queryTerms: ["follow-up", "follow up", "retorno", "aguardando", "pendente", "responder", "cliente", "proposta", "cobranca", "cobrança"]
+  },
+  communication_strategy: {
+    id: "communication_strategy",
+    name: "Analise Estrategica Pessoal",
+    shortName: "Comunicacao",
+    description: "Consultoria honesta sobre perfil de comunicacao, habitos, eficiencia e templates.",
+    systemPrompt:
+      "Voce e um consultor executivo de comunicacao e produtividade. Faca uma analise profunda, honesta e util dos emails, sem ser generico.",
+    defaultQuestion: "Analise meu perfil de comunicacao, habitos problematicos, eficiencia da caixa e recomendacoes praticas.",
+    queryTerms: ["re:", "obrigado", "desculpa", "prazo", "retorno", "confirmar", "reuniao", "cliente", "proposta"]
+  },
+  multi_agent: {
+    id: "multi_agent",
+    name: "Multi-Agent System",
+    shortName: "Equipe de Agentes",
+    description: "Orquestra triage, redacao, riscos e estrategia em um relatorio consolidado.",
+    systemPrompt:
+      "Voce e o coordenador de uma equipe de 4 agentes especialistas: Agente Triage, Agente Redator, Agente de Riscos e Agente Estrategico. Coordene os agentes e entregue um relatorio consolidado, coeso e acionavel.",
+    defaultQuestion: "Coordene triage, redacao, riscos e estrategia para produzir um relatorio consolidado da caixa.",
+    queryTerms: ["urgente", "risco", "problema", "prazo", "responder", "proposta", "contrato", "oportunidade", "cliente", "pagamento"]
+  }
+};
+
 const STOPWORDS = new Set([
   "a", "as", "o", "os", "de", "do", "da", "dos", "das", "e", "em", "na", "no",
   "nas", "nos", "para", "por", "com", "sem", "uma", "um", "me", "minha", "meu",
@@ -542,6 +585,376 @@ function buildInsightQueryPlan({ question, timeframe = "30d", query = "", maxRes
   };
 }
 
+function executiveAgentProfile(agentId) {
+  return EXECUTIVE_AGENT_PROFILES[agentId] || EXECUTIVE_AGENT_PROFILES.executive_assistant;
+}
+
+function buildExecutiveQueryPlan({
+  agentId = "executive_assistant",
+  timeframe = "30d",
+  query = "",
+  maxResults = DEFAULT_INSIGHT_SCAN_RESULTS,
+  categories = ["primary"]
+}) {
+  const profile = executiveAgentProfile(agentId);
+  const days = timeframeToDays(timeframe);
+  const base = windowQuery(days);
+  const selectedCategories = normalizeCategories(categories);
+  const queries = [];
+  const explicitQuery = String(query || "").trim();
+
+  if (explicitQuery) {
+    addQuery(queries, scopedInsightQuery(base, explicitQuery, selectedCategories));
+  }
+
+  for (const term of profile.queryTerms) {
+    addQuery(queries, scopedInsightQuery(base, term, selectedCategories));
+  }
+
+  addQuery(queries, scopedInsightQuery(base, "is:important", selectedCategories));
+  addQuery(queries, scopedInsightQuery(base, "is:unread", selectedCategories));
+
+  if (agentId === "followup_crm" || agentId === "communication_strategy" || agentId === "multi_agent") {
+    addQuery(queries, scopedInsightQuery(base, "in:sent", selectedCategories));
+  }
+
+  addQuery(queries, scopedInsightQuery(base, "", selectedCategories));
+
+  return {
+    profile,
+    analysis: {
+      ...analyzeRequest(`${profile.defaultQuestion} ${query}`),
+      days,
+      focus:
+        agentId === "followup_crm" || agentId === "executive_assistant"
+          ? "pending"
+          : agentId === "communication_strategy" || agentId === "multi_agent"
+            ? "general"
+            : "commercial"
+    },
+    categories: selectedCategories,
+    queries: queries.slice(0, 12),
+    perQueryLimit: Math.min(
+      MAX_INSIGHT_RESULTS_PER_QUERY,
+      Math.max(20, Math.ceil(Number(maxResults || DEFAULT_INSIGHT_SCAN_RESULTS) / Math.max(queries.length || 1, 1)) + 12)
+    )
+  };
+}
+
+function executiveFormatInstruction(profile) {
+  if (profile.id === "executive_assistant") {
+    return "Briefing executivo com critico, importante, baixa prioridade, oportunidades, riscos e acoes recomendadas.";
+  }
+
+  if (profile.id === "followup_crm") {
+    return "Relatorio de follow-ups com pendencias ativas, cobrancas recebidas, relacionamentos mapeados e sugestoes de proatividade.";
+  }
+
+  if (profile.id === "communication_strategy") {
+    return "Analise estrategica de comunicacao com perfil detectado, habitos problematicos, eficiencia e recomendacoes praticas.";
+  }
+
+  return "Relatorio multi-agente com contribuicoes de triage, redator, riscos, estrategico e consolidacao acionavel.";
+}
+
+function buildExecutivePrompt({ profile, context, customInstruction = "" }) {
+  const evidence = context.emails.map((email, index) => ({
+    index: index + 1,
+    type: email._kind || classifyEmail(email),
+    direction: emailDirection(email),
+    relevanceScore: email._score,
+    whySelected: email._reasons || [],
+    subject: email.subject,
+    from: email.from,
+    to: email.to || "",
+    cc: email.cc || "",
+    date: email.date,
+    snippet: email.snippet,
+    bodyPreview: email.bodyPreview
+  }));
+
+  return {
+    model: "gpt-4.1-mini",
+    input: [
+      {
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              profile.systemPrompt,
+              "Use somente as evidencias fornecidas. Nao invente emails, nomes, valores, datas ou prazos.",
+              "Responda em portugues do Brasil, com tom executivo, claro e direto.",
+              "Diferencie rigorosamente direction=recebido de direction=enviado. Email enviado pelo usuario nao e cobranca recebida nem tarefa pedida ao usuario, salvo quando o relatorio pedir explicitamente promessas ou follow-ups iniciados pelo proprio usuario.",
+              "Quando houver incerteza, sinalize como hipotese ou ponto cego.",
+              "Cada conclusao precisa citar evidenceIndexes usando os numeros das evidencias. Nao escreva uma observacao sem evidencia.",
+              "Para cada achado, recomende acoes existentes: generate_note, prepare_reply, apply_label, mark_read, archive.",
+              "Use prepare_reply somente quando houver conversa humana que peca resposta.",
+              "Use generate_note para criar apontamento operacional dentro do MailFlow: registro com evidencias, resumo e proximo passo. Nao prometa calendario, planilha, WhatsApp ou tarefa externa.",
+              "A frase offer precisa bater exatamente com o primeiro botao recomendado. Retorne somente JSON valido, sem markdown."
+            ].join("\n")
+          }
+        ]
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              `Agente selecionado: ${profile.name}`,
+              `Objetivo: ${profile.defaultQuestion}`,
+              customInstruction ? `Instrucao adicional do usuario: ${customInstruction}` : "",
+              "",
+              `Data atual: ${new Date().toISOString()}`,
+              `Janela analisada: ultimos ${context.analysis.days} dias`,
+              `Emails escaneados antes do ranking: ${context.totalScanned}`,
+              `Evidencias enviadas para analise: ${context.emails.length}`,
+              "",
+              "Consultas usadas no Gmail:",
+              JSON.stringify(context.queryPlan, null, 2),
+              "",
+              "Lente obrigatoria do relatorio:",
+              executiveFormatInstruction(profile),
+              "",
+              "Evidencias:",
+              JSON.stringify(evidence, null, 2),
+              "",
+              "Retorne JSON exatamente neste formato:",
+              JSON.stringify(
+                {
+                  title: profile.name,
+                  summary: "Sintese executiva em ate 3 frases, citando evidencias no texto como #1, #4 quando relevante.",
+                  confidence: "alta | media | baixa",
+                  sections: [
+                    {
+                      title: "Nome da secao do agente",
+                      bullets: [
+                        {
+                          text: "Observacao objetiva conectada a evidencias como #1 e #3.",
+                          evidenceIndexes: [1],
+                          priority: "critica | importante | baixa | oportunidade | risco | padrao"
+                        }
+                      ]
+                    }
+                  ],
+                  findings: [
+                    {
+                      title: "Achado acionavel",
+                      type: "critico | importante | oportunidade | risco | relacionamento | comunicacao | follow_up | ruido | padrao",
+                      claim: "O que esta acontecendo, citando #evidencias.",
+                      whyItMatters: "Por que importa.",
+                      nextAction: "Proxima acao concreta.",
+                      evidenceIndexes: [1],
+                      recommendedActions: [
+                        {
+                          kind: "generate_note | prepare_reply | apply_label | mark_read | archive",
+                          label: "Texto do botao. Para generate_note, prefira Criar apontamento.",
+                          offer: "Frase curta que combine com o botao.",
+                          labelValue: "Nome da label se kind for apply_label.",
+                          preview: "Conteudo inicial para nota ou resposta."
+                        }
+                      ],
+                      confidence: "alta | media | baixa"
+                    }
+                  ],
+                  blindSpots: ["O que nao da para concluir com as evidencias atuais."],
+                  suggestedNextQuestions: ["Pergunta boa para aprofundar."]
+                },
+                null,
+                2
+              )
+            ].filter(Boolean).join("\n")
+          }
+        ]
+      }
+    ]
+  };
+}
+
+function fallbackExecutiveReport(profile, context, rawText = "") {
+  const top = context.emails.slice(0, 6);
+  return {
+    title: profile.name,
+    summary:
+      rawText && !rawText.startsWith("OPENAI_API_KEY ausente")
+        ? rawText.slice(0, 600)
+        : "Nao foi possivel gerar o relatorio completo de IA agora. Estes sao os emails mais relevantes encontrados.",
+    confidence: "baixa",
+    sections: [
+      {
+        title: "Evidencias principais",
+        bullets: top.map((email, index) => ({
+          text: `${email.subject} - ${email.from} (#${index + 1})`,
+          evidenceIndexes: [index + 1],
+          priority: email._kind === "pendencia" ? "importante" : "padrao"
+        }))
+      }
+    ],
+    findings: top.map((email, index) => ({
+      title: email.subject,
+      type: email._kind === "pendencia" ? "follow_up" : email._kind === "comercial" ? "oportunidade" : "padrao",
+      claim: `Evidencia #${index + 1} encontrada de ${email.from}.`,
+      whyItMatters: (email._reasons || []).join(", ") || "Foi ranqueada como relevante.",
+      nextAction: "Gerar uma nota organizada antes de agir.",
+      evidenceIndexes: [index + 1],
+      recommendedActions: [
+        {
+          kind: "generate_note",
+          label: "Criar apontamento",
+          offer: "Quer que eu crie um apontamento operacional com esta evidência?",
+          preview: `# Apontamento operacional\n\nAssunto: ${email.subject}\nRemetente: ${email.from}\nData: ${email.date}\nDireção: ${emailDirection(email)}\n\n${email.snippet || email.bodyPreview || ""}`
+        },
+        {
+          kind: "apply_label",
+          label: "Aplicar label",
+          labelValue: "Executive/Revisar"
+        }
+      ],
+      confidence: "baixa"
+    })),
+    blindSpots: ["Sem resposta estruturada da IA, as conclusoes ficam limitadas ao ranking local dos emails."],
+    suggestedNextQuestions: [profile.defaultQuestion]
+  };
+}
+
+function normalizeExecutiveAction(action = {}, finding = {}) {
+  const allowed = new Set(["generate_note", "prepare_reply", "apply_label", "mark_read", "archive"]);
+  const kind = allowed.has(action.kind) ? action.kind : "generate_note";
+  const title = finding.title || "Achado executivo";
+  const claim = finding.claim || "";
+  const why = finding.whyItMatters || "";
+  const next = finding.nextAction || "";
+  return {
+    kind,
+    label:
+      action.label ||
+      (kind === "prepare_reply"
+        ? "Preparar resposta"
+        : kind === "apply_label"
+          ? "Aplicar label"
+          : kind === "archive"
+            ? "Arquivar"
+            : kind === "mark_read"
+              ? "Marcar lido"
+              : "Criar apontamento"),
+    offer: action.offer || "Quer que eu prepare este próximo passo?",
+    labelValue: action.labelValue || "Executive/Revisar",
+    preview:
+      action.preview ||
+      `# ${title}\n\n## Observacao\n${claim}\n\n## Por que importa\n${why}\n\n## Proximo passo\n${next}`
+  };
+}
+
+function defaultExecutiveActions(finding = {}) {
+  const type = normalizeText(`${finding.type || ""} ${finding.title || ""} ${finding.claim || ""}`);
+  if (type.includes("follow") || type.includes("resposta") || type.includes("cobranca") || type.includes("cobran")) {
+    return [
+      {
+        kind: "prepare_reply",
+        label: "Preparar resposta",
+        offer: "Quer que eu prepare uma resposta para o email que sustenta este achado?"
+      },
+      {
+        kind: "apply_label",
+        label: "Aplicar label",
+        labelValue: "Executive/Follow-up"
+      }
+    ];
+  }
+  if (type.includes("ruido") || type.includes("newsletter") || type.includes("baixa")) {
+    return [
+      {
+        kind: "archive",
+        label: "Arquivar email",
+        offer: "Quer que eu prepare o arquivamento do email que sustenta este ruído?"
+      },
+      {
+        kind: "apply_label",
+        label: "Aplicar label",
+        labelValue: "Executive/Ruído"
+      }
+    ];
+  }
+  return [
+    {
+      kind: "generate_note",
+      label: "Criar apontamento",
+      offer: "Quer que eu crie um apontamento operacional com as evidências deste achado?"
+    },
+    {
+      kind: "apply_label",
+      label: "Aplicar label",
+      labelValue: "Executive/Revisar"
+    }
+  ];
+}
+
+function normalizeExecutiveReport(profile, parsed, context) {
+  const base = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? parsed
+    : fallbackExecutiveReport(profile, context);
+  const sections = Array.isArray(base.sections) ? base.sections : [];
+  const rawFindings = Array.isArray(base.findings) && base.findings.length
+    ? base.findings
+    : sections.flatMap((section) =>
+        (Array.isArray(section?.bullets) ? section.bullets : []).map((bullet) => ({
+          title: section?.title || "Achado",
+          type: bullet?.priority || "padrao",
+          claim: bullet?.text || "",
+          whyItMatters: "Este ponto apareceu no relatório do agente e precisa ser conectado às evidências.",
+          nextAction: "Abrir as evidências e decidir o próximo passo.",
+          evidenceIndexes: bullet?.evidenceIndexes || []
+        }))
+      );
+  const findings = rawFindings.length ? rawFindings : context.emails.slice(0, 5).map((email, index) => ({
+    title: email.subject,
+    type: email._kind === "pendencia" ? "follow_up" : email._kind === "comercial" ? "oportunidade" : "padrao",
+    claim: `Email relevante de ${email.from} (#${index + 1}).`,
+    whyItMatters: (email._reasons || []).join(", ") || "Foi ranqueado como evidência importante.",
+    nextAction: "Abrir o email e preparar uma ação.",
+    evidenceIndexes: [index + 1]
+  }));
+  return {
+    title: base.title || profile.name,
+    summary: base.summary || "Relatorio gerado sem sintese principal.",
+    confidence: base.confidence || "media",
+    sections: sections.map((section) => ({
+      title: section?.title || "Secao",
+      bullets: Array.isArray(section?.bullets)
+        ? section.bullets.map((bullet) => ({
+            text: bullet?.text || String(bullet || ""),
+            evidenceIndexes: Array.isArray(bullet?.evidenceIndexes) ? bullet.evidenceIndexes : [],
+            priority: bullet?.priority || "padrao"
+          }))
+        : []
+    })),
+    findings: findings.slice(0, 10).map((finding, index) => {
+      const evidenceIndexes = (Array.isArray(finding?.evidenceIndexes) ? finding.evidenceIndexes : [])
+        .map((item) => Number(item))
+        .filter((item) => Number.isFinite(item) && item >= 1 && item <= context.emails.length);
+      const safeEvidenceIndexes = evidenceIndexes.length
+        ? [...new Set(evidenceIndexes)]
+        : context.emails[index] ? [index + 1] : context.emails[0] ? [1] : [];
+      const rawActions = Array.isArray(finding?.recommendedActions) && finding.recommendedActions.length
+        ? finding.recommendedActions
+        : defaultExecutiveActions(finding);
+      return {
+      title: finding?.title || "Achado executivo",
+      type: finding?.type || "padrao",
+      claim: finding?.claim || "",
+      whyItMatters: finding?.whyItMatters || "",
+      nextAction: finding?.nextAction || "",
+      evidenceIndexes: safeEvidenceIndexes,
+      recommendedActions: rawActions.slice(0, 4).map((action) => normalizeExecutiveAction(action, finding)),
+      confidence: finding?.confidence || base.confidence || "media"
+    };
+    }),
+    blindSpots: Array.isArray(base.blindSpots) ? base.blindSpots : [],
+    suggestedNextQuestions: Array.isArray(base.suggestedNextQuestions) ? base.suggestedNextQuestions : []
+  };
+}
+
 function buildInsightPrompt({ question, context }) {
   const evidence = context.emails.map((email, index) => ({
     index: index + 1,
@@ -566,7 +979,7 @@ function buildInsightPrompt({ question, context }) {
           {
             type: "input_text",
             text:
-              "Voce e um analista de inteligencia pessoal sobre a caixa de email do proprio usuario. Sua funcao nao e resumir emails soltos; e extrair insights acionaveis, padroes, riscos, oportunidades, lacunas e proximos passos. Use somente as evidencias fornecidas. Nao invente fatos, nomes, valores ou prazos. Se a evidencia for fraca, diga claramente. Responda em portugues do Brasil. Para cada insight, classifique operationalType e recomende somente acoes existentes no produto: generate_note, prepare_reply, apply_label, mark_read, archive. Se a melhor acao for organizar informacao, use generate_note com preview estruturado. So use prepare_reply quando houver conversa humana que realmente peca resposta. Nao prometa calendario externo, tarefas externas, WhatsApp, planilhas ou automacoes que nao existem. Retorne somente JSON valido, sem markdown."
+              "Voce e um analista de inteligencia pessoal sobre a caixa de email do proprio usuario. Sua funcao nao e resumir emails soltos; e extrair insights acionaveis, padroes, riscos, oportunidades, lacunas e proximos passos. Use somente as evidencias fornecidas. Nao invente fatos, nomes, valores ou prazos. Se a evidencia for fraca, diga claramente. Responda em portugues do Brasil. Para cada insight, classifique operationalType e recomende somente acoes existentes no produto: generate_note, prepare_reply, apply_label, mark_read, archive. Se a melhor acao for organizar informacao, use generate_note como apontamento operacional com preview estruturado. So use prepare_reply quando houver conversa humana que realmente peca resposta. Nao prometa calendario externo, tarefas externas, WhatsApp, planilhas ou automacoes que nao existem. Retorne somente JSON valido, sem markdown."
           }
         ]
       },
@@ -590,7 +1003,7 @@ function buildInsightPrompt({ question, context }) {
               "- oportunidade_comercial: generate_note para briefing e prepare_reply se houver contato humano.",
               "- negociacao_contrato: generate_note para briefing de negociacao e prepare_reply se houver decisao/resposta humana.",
               "- newsletter_ruido: archive ou apply_label; nao use generate_note como principal.",
-              "- documento_para_organizar/informacao_para_salvar: generate_note.",
+              "- documento_para_organizar/informacao_para_salvar: generate_note com label Criar apontamento.",
               "A frase offer deve bater exatamente com o primeiro botao recomendado.",
               "",
               "Consultas usadas no Gmail:",
@@ -667,13 +1080,13 @@ function fallbackInsightResponse(question, context, rawText = "") {
       title: email.subject,
       claim: `Evidencia encontrada de ${email.from}.`,
       whyItMatters: (email._reasons || []).join(", ") || "Foi ranqueado como relevante para a pergunta.",
-      nextAction: "Gerar uma nota organizada para revisar a evidencia antes de agir.",
+      nextAction: "Criar um apontamento operacional para revisar a evidencia antes de agir.",
       recommendedActions: [
         {
           kind: "generate_note",
-          label: "Gerar nota",
-          offer: "Quer que eu gere uma nota organizada com esta evidência?",
-          preview: `# Nota organizada\n\nAssunto: ${email.subject}\nRemetente: ${email.from}\nData: ${email.date}\n\n${email.snippet || email.bodyPreview || ""}`
+          label: "Criar apontamento",
+          offer: "Quer que eu crie um apontamento operacional com esta evidência?",
+          preview: `# Apontamento operacional\n\nAssunto: ${email.subject}\nRemetente: ${email.from}\nData: ${email.date}\n\n${email.snippet || email.bodyPreview || ""}`
         },
         {
           kind: "apply_label",
@@ -823,6 +1236,82 @@ export async function runInsightAnalysis(userId, options = {}) {
       reasons: email._reasons || [],
       subject: email.subject,
       from: email.from,
+      date: email.date,
+      snippet: email.snippet
+    }))
+  };
+}
+
+export async function runExecutiveAnalysis(userId, options = {}) {
+  const agentId = String(options.agentId || "executive_assistant");
+  const profile = executiveAgentProfile(agentId);
+  const maxResults = Math.min(
+    MAX_INSIGHT_SCAN_RESULTS,
+    Math.max(20, Number(options.maxResults || DEFAULT_INSIGHT_SCAN_RESULTS))
+  );
+  const plan = buildExecutiveQueryPlan({
+    agentId: profile.id,
+    timeframe: options.timeframe || "30d",
+    query: options.query || "",
+    maxResults,
+    categories: options.categories || ["primary"]
+  });
+  const collected = await searchWithPlan(userId, plan);
+  const ranked = rankEmails(
+    collected.emails,
+    `${profile.defaultQuestion} ${options.query || ""} ${options.customInstruction || ""}`,
+    plan.analysis
+  );
+  const useful = ranked.filter((email) => email._kind !== "automatico" || profile.id === "executive_assistant");
+  const emails = (useful.length ? useful : ranked).slice(0, Math.min(maxResults, MAX_INSIGHT_EVIDENCE));
+  const context = {
+    analysis: plan.analysis,
+    queryPlan: plan.queries,
+    emails,
+    totalScanned: collected.emails.length,
+    searchFailures: collected.failures
+  };
+
+  let report;
+  let rawText = "";
+  try {
+    rawText = await callOpenAI(buildExecutivePrompt({
+      profile,
+      context,
+      customInstruction: options.customInstruction || ""
+    }));
+    report = normalizeExecutiveReport(profile, parseJsonObject(rawText), context);
+  } catch {
+    report = fallbackExecutiveReport(profile, context, rawText);
+  }
+
+  return {
+    agent: {
+      id: profile.id,
+      name: profile.name,
+      shortName: profile.shortName,
+      description: profile.description
+    },
+    report,
+    coverage: {
+      timeframe: options.timeframe || "30d",
+      days: plan.analysis.days,
+      categories: plan.categories,
+      scanned: collected.emails.length,
+      evidenceCount: emails.length,
+      failures: collected.failures
+    },
+    queryPlan: plan.queries,
+    sources: emails.map((email, index) => ({
+      index: index + 1,
+      id: email.id,
+      kind: email._kind || classifyEmail(email),
+      direction: emailDirection(email),
+      score: email._score,
+      reasons: email._reasons || [],
+      subject: email.subject,
+      from: email.from,
+      to: email.to || "",
       date: email.date,
       snippet: email.snippet
     }))

@@ -119,8 +119,39 @@ export async function getUserById(userId) {
   return rows[0] || null;
 }
 
+export async function getUserByEmail(email) {
+  const rows = await selectRows("users", {
+    filters: { email_informado: eq(email) },
+    orderBy: "created_at.asc",
+    limit: 1
+  });
+  return rows[0] || null;
+}
+
+export async function getLatestGmailConnectedUser() {
+  const rows = await selectRows("google_connections", {
+    filters: {
+      provider: eq("gmail"),
+      revoked_at: isNull()
+    },
+    orderBy: "updated_at.desc",
+    limit: 1
+  });
+  const connection = rows[0] || null;
+  if (!connection) return null;
+  return getUserById(connection.user_id);
+}
+
 export async function getSessionById(sessionId) {
   const rows = await selectRows("sessions", { filters: { session_id: eq(sessionId) }, limit: 1 });
+  return rows[0] || null;
+}
+
+export async function createSessionForUser(userId, sessionId) {
+  await deleteRows("sessions", { user_id: eq(userId) });
+  const rows = await insertRows("sessions", [
+    { session_id: sessionId, user_id: userId, created_at: nowIso() }
+  ]);
   return rows[0] || null;
 }
 
@@ -132,10 +163,7 @@ export async function acceptInviteAndCreateSession(inviteId, sessionId) {
   const invite = invites[0] || null;
   if (!invite) return null;
 
-  await deleteRows("sessions", { user_id: eq(invite.user_id) });
-  await insertRows("sessions", [
-    { session_id: sessionId, user_id: invite.user_id, created_at: nowIso() }
-  ]);
+  await createSessionForUser(invite.user_id, sessionId);
 
   await updateRows("invites", { invite_id: eq(inviteId) }, {
     status: "accepted",
@@ -176,6 +204,32 @@ export async function getPendingActionByIdForUser(actionId, userId) {
 
 export async function updatePendingAction(actionId, patch) {
   const rows = await updateRows("pending_actions", { id: eq(actionId) }, patch);
+  return rows[0] || null;
+}
+
+export async function listOperationalNotesForUser(userId) {
+  return selectRows("operational_notes", {
+    filters: { user_id: eq(userId) },
+    orderBy: "created_at.desc"
+  });
+}
+
+export async function createOperationalNote(record) {
+  const rows = await insertRows("operational_notes", [record]);
+  return rows[0] || null;
+}
+
+export async function updateOperationalNoteStatus(noteId, userId, status) {
+  const rows = await updateRows(
+    "operational_notes",
+    { id: eq(noteId), user_id: eq(userId) },
+    { status, updated_at: nowIso() }
+  );
+  return rows[0] || null;
+}
+
+export async function deleteOperationalNote(noteId, userId) {
+  const rows = await deleteRows("operational_notes", { id: eq(noteId), user_id: eq(userId) });
   return rows[0] || null;
 }
 

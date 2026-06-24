@@ -1,0 +1,1092 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Executive Inbox Lab</title>
+    <link rel="stylesheet" href="/assets/executive.css?v=5" />
+  </head>
+  <body>
+    <div id="toast" class="ei-toast" hidden></div>
+
+    <div class="ei-shell">
+      <aside class="ei-sidebar">
+        <div class="ei-brand">
+          <div class="ei-mark">E</div>
+          <div>
+            <h1>Executive Inbox Lab</h1>
+            <p id="accountLabel">carregando conta...</p>
+          </div>
+        </div>
+
+        <nav class="mf-scenario-switch" aria-label="Escolher cenário">
+          <span>Cenário</span>
+          <a href="/composer">Explorações</a>
+          <a class="is-active" href="/executive">Executivo</a>
+        </nav>
+
+        <div class="ei-sidebar-title">
+          <span>Agentes</span>
+          <p>Escolha uma lente profissional para a mesma caixa.</p>
+        </div>
+
+        <nav id="agentList" class="ei-agent-list" aria-label="Agentes executivos"></nav>
+
+        <div class="ei-sidebar-foot">
+          <button id="openNotesBtn" class="ei-secondary ei-sidebar-notes" type="button">
+            Pendências salvas <span id="noteCount">0</span>
+          </button>
+          <button id="connectBtn" class="ei-secondary" type="button">Conectar Gmail</button>
+        </div>
+      </aside>
+
+      <main class="ei-main">
+        <header class="ei-hero">
+          <div>
+            <span class="ei-kicker">Visão alternativa</span>
+            <h2 id="activeTitle">Personal Executive Assistant</h2>
+            <p id="activeDescription">Triage de alto nível com prioridades, riscos, oportunidades e ações recomendadas.</p>
+          </div>
+
+          <div class="ei-controls">
+            <select id="timeframeSelect" aria-label="Janela de tempo">
+              <option value="7d">7 dias</option>
+              <option value="30d" selected>30 dias</option>
+              <option value="90d">90 dias</option>
+              <option value="180d">180 dias</option>
+              <option value="365d">365 dias</option>
+            </select>
+            <select id="emailLimitSelect" aria-label="Quantidade de emails">
+              <option value="100">100 emails</option>
+              <option value="200" selected>200 emails</option>
+              <option value="300">300 emails</option>
+              <option value="500">500 emails</option>
+            </select>
+          </div>
+        </header>
+
+        <section class="ei-filter-row" aria-label="Filtros">
+          <label>
+            <input id="categoryPrimary" type="checkbox" value="primary" checked />
+            <span>Principal</span>
+          </label>
+          <label>
+            <input id="categorySocial" type="checkbox" value="social" />
+            <span>Social</span>
+          </label>
+          <label>
+            <input id="categoryPromotions" type="checkbox" value="promotions" />
+            <span>Promoções</span>
+          </label>
+          <input id="customInstruction" type="text" placeholder="Instrução extra opcional. Ex.: foque em clientes e propostas abertas" />
+          <button id="runBtn" class="ei-primary" type="button">Rodar agente</button>
+        </section>
+
+        <section id="metricsGrid" class="ei-metrics" aria-label="Cobertura da análise">
+          <article>
+            <span>Status</span>
+            <strong id="gmailStatus">Verificando</strong>
+            <small id="gmailDetail">Gmail</small>
+          </article>
+          <article>
+            <span>Emails rastreados</span>
+            <strong id="scannedMetric">0</strong>
+            <small id="scannedDetail">antes do ranking</small>
+          </article>
+          <article>
+            <span>Evidências usadas</span>
+            <strong id="evidenceMetric">0</strong>
+            <small>enviadas para IA</small>
+          </article>
+          <article>
+            <span>Agente ativo</span>
+            <strong id="agentMetric">EA</strong>
+            <small id="agentDetail">Briefing</small>
+          </article>
+        </section>
+
+        <section class="ei-workbench">
+          <article class="ei-report-card">
+            <div class="ei-card-head">
+              <span>Achados acionáveis</span>
+              <button id="copyBtn" class="ei-ghost" type="button">Copiar</button>
+            </div>
+            <div id="reportPanel" class="ei-report ei-empty">
+              Rode um agente para ver achados. Depois clique em um achado para abrir os emails compatíveis.
+            </div>
+          </article>
+
+          <aside class="ei-side-column">
+            <section class="ei-evidence-card">
+              <div class="ei-card-head">
+                <span>Emails do achado</span>
+                <small id="sourceCount">0 emails</small>
+              </div>
+              <div id="sourcesPanel" class="ei-sources">
+                <p class="ei-muted">Clique em um achado para ver os emails que sustentam a conclusão.</p>
+              </div>
+            </section>
+          </aside>
+        </section>
+      </main>
+    </div>
+
+    <div id="notesOverlay" class="ei-drawer-overlay" hidden></div>
+    <aside id="notesDrawer" class="ei-drawer" aria-hidden="true" aria-label="Pendências salvas">
+      <div class="ei-drawer-head">
+        <div>
+          <span>Salvas para acompanhar</span>
+          <strong>Pendências salvas</strong>
+        </div>
+        <button id="closeNotesBtn" type="button" aria-label="Fechar pendências">Fechar</button>
+      </div>
+      <div id="notesPanel" class="ei-notes">
+        <p class="ei-muted">Quando você clicar em “Salvar em Pendências”, o item aparece aqui com evidências, próximo passo e opção de excluir.</p>
+      </div>
+    </aside>
+
+    <script src="/assets/common.js"></script>
+    <script>
+      const agents = [
+        {
+          id: "executive_assistant",
+          code: "EA",
+          name: "Personal Executive Assistant",
+          short: "Briefing Diário",
+          description: "Triage de alto nível com prioridades, riscos, oportunidades e ações recomendadas."
+        },
+        {
+          id: "followup_crm",
+          code: "CRM",
+          name: "Follow-up Inteligente",
+          short: "CRM Light",
+          description: "Pendências, cobranças recebidas, relacionamentos quentes/frios e follow-ups sugeridos."
+        },
+        {
+          id: "communication_strategy",
+          code: "COM",
+          name: "Análise Estratégica Pessoal",
+          short: "Comunicação",
+          description: "Perfil de comunicação, hábitos problemáticos, eficiência e templates de resposta."
+        },
+        {
+          id: "multi_agent",
+          code: "MAS",
+          name: "Multi-Agent System",
+          short: "4 agentes coordenados",
+          description: "Triage, redator, riscos e estratégia trabalhando no mesmo relatório consolidado."
+        }
+      ];
+
+      const state = {
+        activeAgentId: "executive_assistant",
+        latestReport: null,
+        latestSources: [],
+        selectedFindingIndex: null,
+        findingArtifacts: {},
+        operationalNotes: [],
+        notesStorageReady: true,
+        notesWarning: "",
+        notesDrawerOpen: false,
+        actionBusy: false,
+        authenticated: false,
+        gmailConnected: false
+      };
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function activeAgent() {
+        return agents.find((agent) => agent.id === state.activeAgentId) || agents[0];
+      }
+
+      function toast(message) {
+        el("toast").textContent = message;
+        el("toast").hidden = false;
+        setTimeout(() => {
+          el("toast").hidden = true;
+        }, 2800);
+      }
+
+      function selectedCategories() {
+        const values = [];
+        if (el("categoryPrimary").checked) values.push("primary");
+        if (el("categorySocial").checked) values.push("social");
+        if (el("categoryPromotions").checked) values.push("promotions");
+        return values.length ? values : ["primary"];
+      }
+
+      function markdownInline(value) {
+        return escapeHtml(value)
+          .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+          .replace(/`(.+?)`/g, "<code>$1</code>");
+      }
+
+      function markdownToHtml(markdown) {
+        const lines = String(markdown || "").split(/\r?\n/);
+        const html = [];
+        let listOpen = false;
+
+        function closeList() {
+          if (listOpen) {
+            html.push("</ul>");
+            listOpen = false;
+          }
+        }
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) {
+            closeList();
+            continue;
+          }
+          if (/^\*\*(.+)\*\*$/.test(trimmed)) {
+            closeList();
+            html.push(`<h3>${markdownInline(trimmed.replace(/^\*\*|\*\*$/g, ""))}</h3>`);
+          } else if (/^#{1,3}\s+/.test(trimmed)) {
+            closeList();
+            html.push(`<h3>${markdownInline(trimmed.replace(/^#{1,3}\s+/, ""))}</h3>`);
+          } else if (/^[-*]\s+/.test(trimmed)) {
+            if (!listOpen) {
+              html.push("<ul>");
+              listOpen = true;
+            }
+            html.push(`<li>${markdownInline(trimmed.replace(/^[-*]\s+/, ""))}</li>`);
+          } else if (/^\d+\.\s+/.test(trimmed)) {
+            if (!listOpen) {
+              html.push("<ul>");
+              listOpen = true;
+            }
+            html.push(`<li>${markdownInline(trimmed.replace(/^\d+\.\s+/, ""))}</li>`);
+          } else {
+            closeList();
+            html.push(`<p>${markdownInline(trimmed)}</p>`);
+          }
+        }
+        closeList();
+        return html.join("");
+      }
+
+      function resetReport(message = "Clique em “Rodar agente” para gerar esta visão.") {
+        state.latestReport = null;
+        state.latestSources = [];
+        state.selectedFindingIndex = null;
+        state.findingArtifacts = {};
+        el("reportPanel").className = "ei-report ei-empty";
+        el("reportPanel").textContent = message;
+        renderSources([]);
+        updateMetrics(null);
+      }
+
+      function sourceByIndex(index) {
+        return state.latestSources.find((source) => Number(source.index) === Number(index));
+      }
+
+      function selectedFinding() {
+        const findings = state.latestReport?.findings || [];
+        return findings[Number(state.selectedFindingIndex)] || null;
+      }
+
+      function sourcesForFinding(finding = selectedFinding()) {
+        const indexes = Array.isArray(finding?.evidenceIndexes) ? finding.evidenceIndexes : [];
+        const wanted = new Set(indexes.map((index) => Number(index)));
+        return state.latestSources.filter((source) => wanted.has(Number(source.index)));
+      }
+
+      function actionsForFinding(finding = selectedFinding()) {
+        const actions = Array.isArray(finding?.recommendedActions) ? finding.recommendedActions : [];
+        return actions.length ? actions : [{ kind: "generate_note", label: "Salvar pendência" }];
+      }
+
+      function actionMeta(action = {}) {
+        const kind = action.kind || "generate_note";
+        const fallback = {
+          title: "Preparar ação",
+          detail: action.offer || "Prepara uma ação baseada neste achado.",
+          badge: "ação"
+        };
+        const byKind = {
+          generate_note: {
+            title: "Salvar em Pendências",
+            detail: "Cria uma pendência salva com evidências e próximo passo. Não mexe no Gmail.",
+            badge: "pendência"
+          },
+          prepare_reply: {
+            title: "Preparar rascunho de resposta",
+            detail: "Cria um rascunho para revisar. Nada é enviado sem sua confirmação.",
+            badge: "não envia"
+          },
+          apply_label: {
+            title: "Preparar label no Gmail",
+            detail: `Sugere aplicar "${action.labelValue || "Executive/Revisar"}". Só altera o Gmail se você confirmar.`,
+            badge: "gmail"
+          },
+          mark_read: {
+            title: "Preparar marcar como lido",
+            detail: "Sugere marcar o email como lido. Só executa no Gmail se você confirmar.",
+            badge: "gmail"
+          },
+          archive: {
+            title: "Preparar arquivamento",
+            detail: "Sugere arquivar o email. Só arquiva no Gmail se você confirmar.",
+            badge: "gmail"
+          }
+        };
+        return byKind[kind] || fallback;
+      }
+
+      function renderActionButtons(findingIndex, finding, { compact = false } = {}) {
+        const actions = actionsForFinding(finding);
+        return `
+          <div class="${compact ? "ei-action-row is-compact" : "ei-action-row"}" aria-label="Ações possíveis para este achado">
+            ${actions.map((action, actionIndex) => {
+              const meta = actionMeta(action);
+              return `
+              <button class="${actionIndex === 0 ? "ei-primary-action" : ""}" type="button" data-executive-action="${escapeHtml(action.kind)}" data-finding-index="${findingIndex}" data-action-index="${actionIndex}">
+                <span>
+                  <b>${escapeHtml(meta.title)}</b>
+                  <small>${escapeHtml(meta.detail)}</small>
+                </span>
+                <em>${escapeHtml(meta.badge)}</em>
+              </button>
+            `;
+            }).join("")}
+          </div>
+        `;
+      }
+
+      function evidenceLinks(indexes = []) {
+        const clean = indexes
+          .map((index) => Number(index))
+          .filter((index) => Number.isFinite(index));
+        if (!clean.length) return "";
+        return clean.map((index) => {
+          const source = sourceByIndex(index);
+          const title = source ? source.subject : `Evidência ${index}`;
+          return `<button type="button" class="ei-evidence-link" data-evidence-index="${index}" title="${escapeHtml(title)}">#${index}</button>`;
+        }).join(" ");
+      }
+
+      function compactText(value, maxLength = 170) {
+        const text = String(value || "").replace(/\s+/g, " ").trim();
+        if (text.length <= maxLength) return text;
+        return `${text.slice(0, maxLength - 1).trim()}…`;
+      }
+
+      function plainReportText(report = state.latestReport) {
+        if (!report) return "";
+        const lines = [
+          report.title || activeAgent().name,
+          "",
+          report.summary || ""
+        ];
+        (report.sections || []).forEach((section) => {
+          lines.push("", section.title || "Seção");
+          (section.bullets || []).forEach((bullet) => {
+            lines.push(`- ${bullet.text || ""} ${(bullet.evidenceIndexes || []).map((index) => `#${index}`).join(" ")}`.trim());
+          });
+        });
+        (report.findings || []).forEach((finding) => {
+          lines.push("", finding.title || "Achado", finding.claim || "", finding.whyItMatters || "", finding.nextAction || "");
+        });
+        return lines.join("\n").trim();
+      }
+
+      function renderAgents() {
+        el("agentList").innerHTML = agents.map((agent) => `
+          <button class="${agent.id === state.activeAgentId ? "is-active" : ""}" type="button" data-agent="${agent.id}">
+            <b>${escapeHtml(agent.code)}</b>
+            <span>
+              <strong>${escapeHtml(agent.name)}</strong>
+              <small>${escapeHtml(agent.short)}</small>
+            </span>
+          </button>
+        `).join("");
+      }
+
+      function renderActiveAgent() {
+        const agent = activeAgent();
+        el("activeTitle").textContent = agent.name;
+        el("activeDescription").textContent = agent.description;
+        el("agentMetric").textContent = agent.code;
+        el("agentDetail").textContent = agent.short;
+        renderAgents();
+      }
+
+      function renderSources(sources = []) {
+        state.latestSources = sources;
+        renderFindingSources();
+      }
+
+      function renderFindingSources() {
+        const finding = selectedFinding();
+        if (!finding) {
+          el("sourceCount").textContent = "0 emails";
+          el("sourcesPanel").innerHTML = `<p class="ei-muted">Clique em um achado para ver os emails compatíveis.</p>`;
+          return;
+        }
+        const findingIndex = Number(state.selectedFindingIndex);
+        const sources = sourcesForFinding(finding);
+        el("sourceCount").textContent = `${sources.length} email(s)`;
+        el("sourcesPanel").innerHTML = `
+          <div class="ei-evidence-heading">Emails que sustentam este achado</div>
+          ${sources.length ? sources.map((source) => `
+          <article id="evidence-${source.index}" class="ei-source">
+            <div>
+              <strong>#${source.index} ${escapeHtml(source.subject)}</strong>
+              <span>${escapeHtml(source.from)}</span>
+            </div>
+            <small>${escapeHtml(source.direction)} · ${escapeHtml(source.kind)} · score ${escapeHtml(source.score)}</small>
+            <p>${escapeHtml(source.snippet || "")}</p>
+          </article>
+          `).join("") : `<p class="ei-muted">O achado veio sem email compatível suficiente. Rode de novo com mais emails ou outra janela.</p>`}
+        `;
+      }
+
+      function renderArtifact(findingIndex, { inSidePanel = false } = {}) {
+        const artifact = state.findingArtifacts[findingIndex];
+        if (!artifact) return "";
+        const pending = artifact.pendingAction;
+        const isReply = pending?.toolName === "create_draft" || pending?.toolName === "reply_email";
+        const statusText = pending
+          ? isReply
+            ? "Rascunho preparado. Nada foi enviado ainda."
+            : "Ação preparada. Nada foi executado no Gmail ainda."
+          : artifact.note
+            ? "Salvo em Pendências salvas."
+            : "Conteúdo preparado.";
+        return `
+          <div class="ei-artifact ${inSidePanel ? "is-side" : ""}">
+            <div>
+              <strong>${escapeHtml(artifact.title)}</strong>
+              <button type="button" data-copy-artifact="${findingIndex}">Copiar</button>
+            </div>
+            <p class="ei-action-state">${escapeHtml(statusText)}</p>
+            ${pending?.editable ? `
+              <textarea id="artifact-${findingIndex}">${escapeHtml(artifact.content)}</textarea>
+            ` : `
+              <pre id="artifact-${findingIndex}">${escapeHtml(artifact.content)}</pre>
+            `}
+            ${pending ? `
+              <div class="ei-confirm-row">
+                <button type="button" data-exec-confirm="${findingIndex}">${escapeHtml(pending.confirmLabel || "Confirmar")}</button>
+                <button type="button" data-exec-cancel="${findingIndex}">Cancelar</button>
+              </div>
+            ` : artifact.note ? `
+              <div class="ei-confirm-row">
+                <button type="button" data-open-notes>Ver em Pendências</button>
+              </div>
+            ` : ""}
+          </div>
+        `;
+      }
+
+      function renderNotes(message = "") {
+        const notes = state.operationalNotes || [];
+        const openCount = notes.filter((note) => note.status === "open").length;
+        el("noteCount").textContent = openCount;
+        const warning = message || state.notesWarning || "";
+
+        if (!state.notesStorageReady) {
+          state.notesWarning = warning || "Atualize o schema do Supabase para salvar pendências.";
+        }
+
+        if (!notes.length) {
+          el("notesPanel").innerHTML = `
+            ${warning ? `<p class="ei-warning">${escapeHtml(warning)}</p>` : ""}
+            <p class="ei-muted">Nenhuma pendência salva ainda.</p>
+          `;
+          return;
+        }
+
+        el("notesPanel").innerHTML = `
+          ${warning ? `<p class="ei-warning">${escapeHtml(warning)}</p>` : ""}
+          ${notes.map((note) => `
+          <article class="ei-note ${note.status !== "open" ? "is-closed" : ""}">
+            <div class="ei-note-head">
+              <span>${escapeHtml(note.type || "pendência")} · ${escapeHtml(note.status || "open")}</span>
+              <small>${Array.isArray(note.evidenceIndexes) ? note.evidenceIndexes.length : 0} evidência(s)</small>
+            </div>
+            <strong>${escapeHtml(note.title)}</strong>
+            <p>${escapeHtml(note.summary)}</p>
+            ${note.nextAction ? `<p><b>Próximo passo:</b> ${escapeHtml(note.nextAction)}</p>` : ""}
+            ${Array.isArray(note.sources) && note.sources.length ? `
+              <div class="ei-note-evidence">
+                ${note.sources.slice(0, 3).map((source) => `
+                  <span>#${escapeHtml(source.index || "")} ${escapeHtml(source.subject || "email")}</span>
+                `).join("")}
+              </div>
+            ` : ""}
+            <div class="ei-note-actions">
+              ${note.status === "open" ? `
+                <button type="button" data-note-status="done" data-note-id="${escapeHtml(note.id)}">Marcar resolvido</button>
+                <button type="button" data-note-status="archived" data-note-id="${escapeHtml(note.id)}">Arquivar</button>
+              ` : `
+                <button type="button" data-note-status="open" data-note-id="${escapeHtml(note.id)}">Reabrir</button>
+              `}
+              <button class="is-danger" type="button" data-note-delete="${escapeHtml(note.id)}">Excluir</button>
+            </div>
+          </article>
+          `).join("")}
+        `;
+      }
+
+      function renderNotesDrawer() {
+        el("notesOverlay").hidden = !state.notesDrawerOpen;
+        el("notesDrawer").classList.toggle("is-open", state.notesDrawerOpen);
+        el("notesDrawer").setAttribute("aria-hidden", state.notesDrawerOpen ? "false" : "true");
+      }
+
+      function openNotesDrawer() {
+        state.notesDrawerOpen = true;
+        renderNotesDrawer();
+      }
+
+      function closeNotesDrawer() {
+        state.notesDrawerOpen = false;
+        renderNotesDrawer();
+      }
+
+      async function loadOperationalNotes() {
+        try {
+          const data = await api("/api/executive/notes");
+          state.notesStorageReady = data.storageReady !== false;
+          state.notesWarning = data.error || data.warning || "";
+          state.operationalNotes = Array.isArray(data.notes) ? data.notes : [];
+          renderNotes();
+        } catch (error) {
+          state.notesStorageReady = false;
+          state.notesWarning = error.message || "Não consegui carregar pendências.";
+          state.operationalNotes = [];
+          renderNotes();
+        }
+      }
+
+      function noteContentForFinding(finding, action) {
+        return action.preview || [
+          `# ${finding.title || "Pendência salva"}`,
+          "",
+          "## Observação",
+          finding.claim || "",
+          "",
+          "## Por que importa",
+          finding.whyItMatters || "",
+          "",
+          "## Próximo passo",
+          finding.nextAction || action.offer || "",
+          "",
+          "## Evidências",
+          sourcesForFinding(finding).map((source) => `#${source.index} ${source.subject} - ${source.from}`).join("\n")
+        ].join("\n").trim();
+      }
+
+      function notePayloadForFinding(finding, action) {
+        const sources = sourcesForFinding(finding).map((source) => ({
+          index: source.index,
+          id: source.id,
+          subject: source.subject,
+          from: source.from,
+          date: source.date,
+          direction: source.direction,
+          snippet: source.snippet
+        }));
+        return {
+          agentId: state.activeAgentId,
+          type: finding.type || "pendência",
+          title: finding.title || "Pendência salva",
+          summary: noteContentForFinding(finding, action),
+          nextAction: finding.nextAction || action.offer || "",
+          evidenceIndexes: finding.evidenceIndexes || [],
+          sources
+        };
+      }
+
+      async function createOperationalNoteFromFinding(findingIndex, finding, action) {
+        state.actionBusy = true;
+        try {
+          const data = await api("/api/executive/notes", {
+            method: "POST",
+            body: JSON.stringify(notePayloadForFinding(finding, action))
+          });
+          const note = data.note;
+          state.notesStorageReady = data.storageReady !== false;
+          state.notesWarning = data.warning || state.notesWarning;
+          state.operationalNotes = [
+            note,
+            ...state.operationalNotes.filter((item) => item.id !== note.id)
+          ];
+          state.findingArtifacts[findingIndex] = {
+            title: "Salvo em Pendências",
+            content: `${note.title}\n\n${note.summary}`,
+            note
+          };
+          renderNotes();
+          openNotesDrawer();
+          renderReport(state.latestReport);
+          toast("Salvei em Pendências.");
+        } catch (error) {
+          state.findingArtifacts[findingIndex] = {
+            title: "Pendência preparada",
+            content: `${noteContentForFinding(finding, action)}\n\nNão consegui salvar no banco ainda: ${error.message || "erro desconhecido"}`
+          };
+          renderReport(state.latestReport);
+          toast(error.message || "Não consegui salvar a pendência.");
+        } finally {
+          state.actionBusy = false;
+        }
+      }
+
+      async function updateNoteStatus(noteId, status) {
+        if (state.actionBusy) return;
+        state.actionBusy = true;
+        try {
+          const data = await api(`/api/executive/notes/${encodeURIComponent(noteId)}/status`, {
+            method: "POST",
+            body: JSON.stringify({ status })
+          });
+          state.notesStorageReady = data.storageReady !== false;
+          state.notesWarning = data.warning || state.notesWarning;
+          state.operationalNotes = state.operationalNotes.map((note) =>
+            note.id === noteId ? data.note : note
+          );
+          renderNotes();
+          toast(status === "done" ? "Pendência marcada como resolvida." : status === "archived" ? "Pendência arquivada." : "Pendência reaberta.");
+        } catch (error) {
+          toast(error.message || "Não consegui atualizar a pendência.");
+        } finally {
+          state.actionBusy = false;
+        }
+      }
+
+      async function deleteNote(noteId) {
+        if (state.actionBusy) return;
+        state.actionBusy = true;
+        try {
+          const data = await api(`/api/executive/notes/${encodeURIComponent(noteId)}`, {
+            method: "DELETE"
+          });
+          state.notesStorageReady = data.storageReady !== false;
+          state.notesWarning = data.warning || state.notesWarning;
+          state.operationalNotes = state.operationalNotes.filter((note) => note.id !== noteId);
+          renderNotes();
+          toast("Pendência excluída.");
+        } catch (error) {
+          toast(error.message || "Não consegui excluir a pendência.");
+        } finally {
+          state.actionBusy = false;
+        }
+      }
+
+      function renderReport(report) {
+        state.latestReport = report;
+        const findings = Array.isArray(report?.findings) ? report.findings : [];
+        if (!findings.length) {
+          state.selectedFindingIndex = null;
+        } else if (state.selectedFindingIndex === null || !findings[state.selectedFindingIndex]) {
+          state.selectedFindingIndex = 0;
+        }
+        el("reportPanel").className = "ei-report";
+        el("reportPanel").innerHTML = `
+          <section class="ei-summary">
+            <span>${escapeHtml(report?.confidence || "media")}</span>
+            <h3>${escapeHtml(report?.title || activeAgent().name)}</h3>
+            <p>${escapeHtml(report?.summary || "Sem síntese.")}</p>
+          </section>
+
+          <section class="ei-section">
+            <h3>Achados</h3>
+            <p class="ei-muted">Clique em um achado para expandir o card, ver ações possíveis e abrir as evidências no painel direito.</p>
+            <div class="ei-finding-list">
+              ${findings.map((finding, index) => renderFinding(finding, index)).join("") || `<p class="ei-muted">Nenhum achado acionável retornado.</p>`}
+            </div>
+          </section>
+        `;
+        renderFindingSources();
+      }
+
+      function renderFinding(finding, index) {
+        const selected = Number(state.selectedFindingIndex) === Number(index);
+        const evidenceCount = (finding.evidenceIndexes || []).length;
+        return `
+          <article class="ei-finding ${selected ? "is-active" : ""}" data-select-finding="${index}">
+            <div class="ei-finding-head">
+              <span>Achado ${index + 1} · ${escapeHtml(finding.type || "achado")} · ${escapeHtml(finding.confidence || "media")}</span>
+              <small>${evidenceCount} email(s)</small>
+            </div>
+            <h4>${escapeHtml(finding.title || "Achado")}</h4>
+            <p>${escapeHtml(compactText(finding.claim || finding.whyItMatters || finding.nextAction || "Clique para abrir este achado.", 230))}</p>
+            ${selected ? `
+              <div class="ei-finding-detail">
+                ${finding.whyItMatters ? `<p><b>Por que importa:</b> ${escapeHtml(finding.whyItMatters)}</p>` : ""}
+                ${finding.nextAction ? `<p><b>Próximo passo:</b> ${escapeHtml(finding.nextAction)}</p>` : ""}
+                <div class="ei-card-actions-title">Ações deste achado</div>
+                ${renderActionButtons(index, finding)}
+                ${renderArtifact(index)}
+              </div>
+            ` : ""}
+            <div class="ei-collapsed-row">
+              <small class="ei-open-hint">${selected ? "Evidências abertas à direita" : "Clique para expandir ações e evidências."}</small>
+              <button type="button" class="ei-expand-button" aria-pressed="${selected ? "true" : "false"}">
+                ${selected ? "Selecionado" : "Ver detalhe"}
+              </button>
+            </div>
+          </article>
+        `;
+      }
+
+      function updateMetrics(analysis) {
+        const coverage = analysis?.coverage || {};
+        el("scannedMetric").textContent = coverage.scanned ?? 0;
+        el("evidenceMetric").textContent = coverage.evidenceCount ?? 0;
+        el("scannedDetail").textContent = `${coverage.timeframe || el("timeframeSelect").value} · ${selectedCategories().join(", ")}`;
+      }
+
+      async function loadSession({ allowBootstrap = true } = {}) {
+        const data = await api("/api/session");
+        if (!data.authenticated) {
+          if (allowBootstrap) {
+            try {
+              await api("/api/dev/session", { method: "POST", body: JSON.stringify({}) });
+              return loadSession({ allowBootstrap: false });
+            } catch {
+              // Production still requires an invite; fall through to the visible empty state.
+            }
+          }
+          el("accountLabel").textContent = "sem sessão";
+          el("gmailStatus").textContent = "Sem sessão";
+          el("gmailDetail").textContent = "Clique em conectar";
+          el("connectBtn").textContent = "Criar sessão e conectar Gmail";
+          el("connectBtn").disabled = false;
+          state.authenticated = false;
+          state.gmailConnected = false;
+          return;
+        }
+        const user = data.user || {};
+        const gmail = data.connections || {};
+
+        if (allowBootstrap && !gmail.gmailConnected) {
+          try {
+            const boot = await api("/api/dev/session", { method: "POST", body: JSON.stringify({}) });
+            if (boot.switchedToConnectedUser) return loadSession({ allowBootstrap: false });
+          } catch {
+            // No-op in production.
+          }
+        }
+
+        state.authenticated = true;
+        state.gmailConnected = Boolean(gmail.gmailConnected);
+        el("accountLabel").textContent = gmail.googleEmail || user.email_informado || user.nome || "conta conectada";
+        el("gmailStatus").textContent = gmail.gmailConnected ? "Conectado" : "Não conectado";
+        el("gmailDetail").textContent = gmail.googleEmail || "Gmail";
+        el("connectBtn").textContent = gmail.gmailConnected ? "Gmail conectado" : "Conectar Gmail";
+        el("connectBtn").disabled = Boolean(gmail.gmailConnected);
+      }
+
+      async function runAgent() {
+        const agent = activeAgent();
+        el("runBtn").disabled = true;
+        el("runBtn").textContent = "Analisando...";
+        el("reportPanel").className = "ei-report ei-loading";
+        el("reportPanel").textContent = "Lendo emails, ranqueando evidências e chamando o agente executivo...";
+        renderSources([]);
+
+        try {
+          const data = await api("/api/executive/analyze", {
+            method: "POST",
+            body: JSON.stringify({
+              agentId: agent.id,
+              timeframe: el("timeframeSelect").value,
+              maxResults: Number(el("emailLimitSelect").value),
+              categories: selectedCategories(),
+              customInstruction: el("customInstruction").value.trim()
+            })
+          });
+          renderSources(data.analysis.sources || []);
+          state.findingArtifacts = {};
+          state.selectedFindingIndex = null;
+          renderReport(data.analysis.report);
+          updateMetrics(data.analysis);
+          toast("Relatório executivo gerado.");
+        } catch (error) {
+          el("reportPanel").className = "ei-report ei-empty";
+          el("reportPanel").textContent = error.message;
+          toast(error.message);
+        } finally {
+          el("runBtn").disabled = false;
+          el("runBtn").textContent = "Rodar agente";
+        }
+      }
+
+      el("agentList").addEventListener("click", (event) => {
+        const button = event.target.closest("[data-agent]");
+        if (!button) return;
+        state.activeAgentId = button.dataset.agent;
+        renderActiveAgent();
+        resetReport(`Clique em “Rodar agente” para gerar a visão ${activeAgent().name}.`);
+      });
+
+      el("reportPanel").addEventListener("click", async (event) => {
+        const evidenceButton = event.target.closest("[data-evidence-index]");
+        if (evidenceButton) {
+          const findingCard = event.target.closest("[data-select-finding]");
+          if (findingCard) {
+            state.selectedFindingIndex = Number(findingCard.dataset.selectFinding);
+            renderReport(state.latestReport);
+          }
+          const target = document.getElementById(`evidence-${evidenceButton.dataset.evidenceIndex}`);
+          if (target) {
+            target.scrollIntoView({ behavior: "smooth", block: "center" });
+            target.classList.add("is-highlighted");
+            setTimeout(() => target.classList.remove("is-highlighted"), 1800);
+          }
+          return;
+        }
+
+        const copyButton = event.target.closest("[data-copy-artifact]");
+        if (copyButton) {
+          const index = copyButton.dataset.copyArtifact;
+          const node = el(`artifact-${index}`);
+          const content = node?.value || node?.textContent || state.findingArtifacts[index]?.content || "";
+          await navigator.clipboard.writeText(content);
+          toast("Conteúdo copiado.");
+          return;
+        }
+
+        const confirmButton = event.target.closest("[data-exec-confirm]");
+        if (confirmButton) {
+          resolveExecutivePendingAction(Number(confirmButton.dataset.execConfirm), "confirm");
+          return;
+        }
+
+        const cancelButton = event.target.closest("[data-exec-cancel]");
+        if (cancelButton) {
+          resolveExecutivePendingAction(Number(cancelButton.dataset.execCancel), "cancel");
+          return;
+        }
+
+        const actionButton = event.target.closest("[data-executive-action]");
+        if (actionButton) {
+          prepareExecutiveAction(
+            actionButton.dataset.executiveAction,
+            Number(actionButton.dataset.findingIndex),
+            Number(actionButton.dataset.actionIndex)
+          );
+          return;
+        }
+
+        const findingCard = event.target.closest("[data-select-finding]");
+        if (findingCard) {
+          state.selectedFindingIndex = Number(findingCard.dataset.selectFinding);
+          renderReport(state.latestReport);
+          return;
+        }
+      });
+
+      el("sourcesPanel").addEventListener("click", (event) => {
+        const openNotesButton = event.target.closest("[data-open-notes]");
+        if (openNotesButton) {
+          openNotesDrawer();
+          return;
+        }
+
+        const copyButton = event.target.closest("[data-copy-artifact]");
+        if (copyButton) {
+          const index = copyButton.dataset.copyArtifact;
+          const node = el(`artifact-${index}`);
+          const content = node?.value || node?.textContent || state.findingArtifacts[index]?.content || "";
+          navigator.clipboard.writeText(content);
+          toast("Conteúdo copiado.");
+          return;
+        }
+
+        const confirmButton = event.target.closest("[data-exec-confirm]");
+        if (confirmButton) {
+          resolveExecutivePendingAction(Number(confirmButton.dataset.execConfirm), "confirm");
+          return;
+        }
+
+        const cancelButton = event.target.closest("[data-exec-cancel]");
+        if (cancelButton) {
+          resolveExecutivePendingAction(Number(cancelButton.dataset.execCancel), "cancel");
+          return;
+        }
+
+        const actionButton = event.target.closest("[data-executive-action]");
+        if (actionButton) {
+          prepareExecutiveAction(
+            actionButton.dataset.executiveAction,
+            Number(actionButton.dataset.findingIndex),
+            Number(actionButton.dataset.actionIndex)
+          );
+        }
+      });
+
+      el("notesPanel").addEventListener("click", (event) => {
+        const deleteButton = event.target.closest("[data-note-delete]");
+        if (deleteButton) {
+          deleteNote(deleteButton.dataset.noteDelete);
+          return;
+        }
+        const button = event.target.closest("[data-note-status]");
+        if (!button) return;
+        updateNoteStatus(button.dataset.noteId, button.dataset.noteStatus);
+      });
+
+      el("openNotesBtn").onclick = openNotesDrawer;
+      el("closeNotesBtn").onclick = closeNotesDrawer;
+      el("notesOverlay").onclick = closeNotesDrawer;
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && state.notesDrawerOpen) closeNotesDrawer();
+      });
+
+      el("runBtn").onclick = runAgent;
+      el("connectBtn").onclick = () => {
+        connectGmail();
+      };
+      el("copyBtn").onclick = async () => {
+        if (!state.latestReport) return toast("Gere um relatório primeiro.");
+        await navigator.clipboard.writeText(plainReportText());
+        toast("Relatório copiado.");
+      };
+
+      renderActiveAgent();
+      renderNotes();
+      renderNotesDrawer();
+      loadSession()
+        .then(() => loadOperationalNotes())
+        .catch((error) => toast(error.message));
+
+      async function connectGmail() {
+        try {
+          if (!state.authenticated || !state.gmailConnected) {
+            const boot = await api("/api/dev/session", { method: "POST", body: JSON.stringify({}) });
+            if (boot.switchedToConnectedUser) {
+              await loadSession({ allowBootstrap: false });
+              toast("Usei a conexão Gmail que já existia nesta máquina.");
+              return;
+            }
+          }
+          window.location.href = "/api/google/gmail/start?returnTo=/executive";
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function prepareExecutiveAction(kind, findingIndex, actionIndex) {
+        if (state.actionBusy) return;
+        const finding = state.latestReport?.findings?.[findingIndex];
+        if (!finding) return;
+        const action = finding.recommendedActions?.[actionIndex] || { kind: "generate_note", label: "Salvar pendência" };
+        state.selectedFindingIndex = findingIndex;
+
+        if (kind === "generate_note") {
+          await createOperationalNoteFromFinding(findingIndex, finding, action);
+          return;
+        }
+
+        const source = sourceByIndex((finding.evidenceIndexes || [])[0]);
+
+        if (!source?.id) {
+          state.findingArtifacts[findingIndex] = {
+            title: action.label || "Ação sugerida",
+            content: `${action.offer || finding.nextAction || "Ação sugerida."}\n\nNão encontrei um email alvo confiável para preparar esta ação no Gmail.`
+          };
+          renderReport(state.latestReport);
+          toast("Faltou email alvo confiável para preparar esta ação.");
+          return;
+        }
+
+        state.actionBusy = true;
+        try {
+          let data;
+          if (kind === "prepare_reply") {
+            data = await api("/api/composer/prepare-reply", {
+              method: "POST",
+              body: JSON.stringify({
+                messageId: source.id,
+                instruction: action.preview || finding.nextAction || finding.claim || ""
+              })
+            });
+          } else if (kind === "apply_label") {
+            data = await api("/api/inbox/actions/apply-label", {
+              method: "POST",
+              body: JSON.stringify({
+                messageId: source.id,
+                label: action.labelValue || "Executive/Revisar"
+              })
+            });
+          } else if (kind === "mark_read") {
+            data = await api("/api/inbox/actions/mark-read", {
+              method: "POST",
+              body: JSON.stringify({ messageId: source.id })
+            });
+          } else if (kind === "archive") {
+            data = await api("/api/inbox/actions/archive", {
+              method: "POST",
+              body: JSON.stringify({ messageId: source.id })
+            });
+          }
+
+          const pending = data?.pendingAction;
+          const actionTitle = kind === "prepare_reply"
+            ? "Resposta preparada para revisão"
+            : kind === "apply_label"
+              ? "Label preparada"
+              : kind === "archive"
+                ? "Arquivamento preparado"
+                : kind === "mark_read"
+                  ? "Marcar como lido preparado"
+                  : pending?.title || action.label || "Ação preparada";
+          state.findingArtifacts[findingIndex] = {
+            title: actionTitle,
+            content: data?.answer || pending?.previewText || pending?.summary || "Ação preparada e aguardando confirmação.",
+            pendingAction: pending || null
+          };
+          renderReport(state.latestReport);
+          toast(data?.message || "Ação preparada e aguardando confirmação.");
+        } catch (error) {
+          toast(error.message || "Não consegui preparar a ação.");
+        } finally {
+          state.actionBusy = false;
+        }
+      }
+
+      async function resolveExecutivePendingAction(findingIndex, command) {
+        const artifact = state.findingArtifacts[findingIndex];
+        const pending = artifact?.pendingAction;
+        if (!pending?.id || state.actionBusy) return;
+        state.actionBusy = true;
+        try {
+          const node = el(`artifact-${findingIndex}`);
+          const editedContent = node?.value || node?.textContent || artifact.content || "";
+          const data = await api(`/api/agent/actions/${encodeURIComponent(pending.id)}/${command}`, {
+            method: "POST",
+            body: JSON.stringify({ editedContent })
+          });
+          if (command === "cancel") {
+            delete state.findingArtifacts[findingIndex];
+            toast("Ação cancelada.");
+          } else {
+            state.findingArtifacts[findingIndex] = {
+              title: "Ação executada",
+              content: data?.message || "Ação executada com confirmação.",
+              pendingAction: null
+            };
+            toast(data?.message || "Ação executada.");
+          }
+          renderReport(state.latestReport);
+        } catch (error) {
+          toast(error.message || "Não consegui resolver a ação.");
+        } finally {
+          state.actionBusy = false;
+        }
+      }
+    </script>
+  </body>
+</html>

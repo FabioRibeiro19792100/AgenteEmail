@@ -6,24 +6,31 @@ import { fileURLToPath } from "node:url";
 import {
   acceptInviteAndCreateSession,
   appendAgentLog,
+  createSessionForUser,
   consumeOAuthState,
+  createOperationalNote,
   createOAuthState,
   createPendingAction,
   defaultWeeklyReportSettings,
+  deleteOperationalNote,
   generateId,
   getPendingActionByIdForUser,
+  getLatestGmailConnectedUser,
   getReadyStats,
+  getUserByEmail,
   getSessionById,
   getUserById,
   getWeeklyReportSettings,
   importStudents,
+  listOperationalNotesForUser,
   listPendingActionsForUser,
   listStudents,
   nowIso,
+  updateOperationalNoteStatus,
   updatePendingAction,
   upsertWeeklyReportSettings
 } from "./db.js";
-import { prepareReplyForEmail, refineDraftWithAI, runAgent, runInsightAnalysis } from "./agent.js";
+import { prepareReplyForEmail, refineDraftWithAI, runAgent, runExecutiveAnalysis, runInsightAnalysis } from "./agent.js";
 import { getConfig, loadEnv, validateConfig } from "./config.js";
 import {
   applyLabel,
@@ -55,6 +62,7 @@ try {
 }
 
 const publicDir = path.join(process.cwd(), "public");
+const operationalNotesFallbackStore = new Map();
 
 function sendJson(res, status, payload) {
   res.writeHead(status, {
@@ -125,6 +133,57 @@ async function getSessionUser(req) {
   return getUserById(session.user_id);
 }
 
+async function getOrCreateLocalFallbackUser() {
+  const email = process.env.DEV_USER_EMAIL || "teste-local@mailflow.local";
+  let user = await getUserByEmail(email);
+  if (user) return user;
+
+  const created = await importStudents([
+    {
+      nome: "Teste Local",
+      turma: "Teste Local",
+      email,
+      papel: "aluno",
+      instituicao: "Local"
+    }
+  ]);
+  if (!created.length) throw new Error("Nao foi possivel criar cabine local.");
+  user = await getUserByEmail(email);
+  if (!user) throw new Error("Cabine local nao encontrada.");
+  return user;
+}
+
+async function setSessionForUser(res, user) {
+  const sessionId = crypto.randomBytes(16).toString("hex");
+  await createSessionForUser(user.user_id, sessionId);
+  setCookie(res, "session_id", sessionId);
+}
+
+async function resolveProductUser(req, res, { createFallback = true } = {}) {
+  const existingUser = await getSessionUser(req);
+  if (config.isProduction) return existingUser;
+
+  const connectedUser = await getLatestGmailConnectedUser();
+  if (existingUser) {
+    const existingGmail = await getGmailConnectionStatus(existingUser.user_id);
+    if (existingGmail || !connectedUser || connectedUser.user_id === existingUser.user_id) {
+      return existingUser;
+    }
+    await setSessionForUser(res, connectedUser);
+    return connectedUser;
+  }
+
+  if (connectedUser) {
+    await setSessionForUser(res, connectedUser);
+    return connectedUser;
+  }
+
+  if (!createFallback) return null;
+  const fallbackUser = await getOrCreateLocalFallbackUser();
+  await setSessionForUser(res, fallbackUser);
+  return fallbackUser;
+}
+
 async function gmailConnectionSummary(userId) {
   const gmail = await getGmailConnectionStatus(userId);
   return {
@@ -133,6 +192,22 @@ async function gmailConnectionSummary(userId) {
     scopes: gmail?.scopes || [],
     operationalReady: gmail?.operational || false
   };
+}
+
+async function bootstrapLocalSession(req, res) {
+  if (config.isProduction) {
+    return sendJson(res, 403, { error: "Em producao, entre por um link individual de convite." });
+  }
+
+  const before = await getSessionUser(req);
+  const beforeId = before?.user_id || "";
+  const user = await resolveProductUser(req, res, { createFallback: true });
+  return sendJson(res, 200, {
+    ok: true,
+    user,
+    alreadyAuthenticated: Boolean(before),
+    switchedToConnectedUser: Boolean(beforeId && user?.user_id && beforeId !== user.user_id)
+  });
 }
 
 async function logAction({ userId, turmaId, actionType, toolName, status }) {
@@ -148,7 +223,7 @@ async function logAction({ userId, turmaId, actionType, toolName, status }) {
 }
 
 async function ensureAuth(req, res) {
-  const user = await getSessionUser(req);
+  const user = await resolveProductUser(req, res, { createFallback: true });
   if (!user) {
     sendJson(res, 401, { error: "Sessao invalida ou expirada." });
     return null;
@@ -260,6 +335,7 @@ function routePage(urlPath) {
     "/admin/import": "admin-import.html",
     "/admin/students": "admin-students.html",
     "/composer": "composer.html",
+    "/executive": "executive.html",
     "/connections": "connections.html",
     "/availability": "availability.html"
   };
@@ -268,6 +344,13 @@ function routePage(urlPath) {
 
 function inviteLink(req, inviteId) {
   return `${requestOrigin(req)}/invite/${inviteId}`;
+}
+
+function safeReturnTo(value, fallback = "/executive") {
+  const target = String(value || "").trim();
+  if (!target || !target.startsWith("/") || target.startsWith("//")) return fallback;
+  if (target.includes("\n") || target.includes("\r")) return fallback;
+  return target;
 }
 
 function parseImportRows(rawInput) {
@@ -378,6 +461,93 @@ function serializePendingAction(action) {
     previewText: action.preview_text,
     createdAt: action.created_at
   };
+}
+
+function serializeOperationalNote(note) {
+  return {
+    id: note.id,
+    agentId: note.agent_id || "",
+    type: note.type || "apontamento",
+    title: note.title || "Apontamento operacional",
+    summary: note.summary || "",
+    nextAction: note.next_action || "",
+    evidenceIndexes: Array.isArray(note.evidence_indexes) ? note.evidence_indexes : [],
+    sources: Array.isArray(note.sources) ? note.sources : [],
+    status: note.status || "open",
+    createdAt: note.created_at,
+    updatedAt: note.updated_at
+  };
+}
+
+function normalizeOperationalNoteBody(body = {}) {
+  const evidenceIndexes = Array.isArray(body.evidenceIndexes)
+    ? body.evidenceIndexes
+        .map((item) => Number(item))
+        .filter((item) => Number.isFinite(item))
+        .slice(0, 30)
+    : [];
+  const sources = Array.isArray(body.sources)
+    ? body.sources.slice(0, 30).map((source) => ({
+        index: Number(source.index) || null,
+        id: String(source.id || ""),
+        subject: String(source.subject || "").slice(0, 240),
+        from: String(source.from || "").slice(0, 240),
+        date: String(source.date || "").slice(0, 120),
+        direction: String(source.direction || "").slice(0, 40),
+        snippet: String(source.snippet || "").slice(0, 700)
+      }))
+    : [];
+  const title = String(body.title || "Apontamento operacional").trim().slice(0, 180);
+  const summary = String(body.summary || "").trim().slice(0, 8000);
+  return {
+    agent_id: String(body.agentId || "").slice(0, 80),
+    type: String(body.type || "apontamento").slice(0, 80),
+    title: title || "Apontamento operacional",
+    summary,
+    next_action: String(body.nextAction || "").trim().slice(0, 1200),
+    evidence_indexes: evidenceIndexes,
+    sources
+  };
+}
+
+function fallbackNotesForUser(userId) {
+  if (!operationalNotesFallbackStore.has(userId)) {
+    operationalNotesFallbackStore.set(userId, []);
+  }
+  return operationalNotesFallbackStore.get(userId);
+}
+
+function createFallbackOperationalNote(user, payload) {
+  const now = nowIso();
+  const note = {
+    id: generateId("note"),
+    user_id: user.user_id,
+    turma_id: user.turma_id,
+    ...payload,
+    status: "open",
+    created_at: now,
+    updated_at: now
+  };
+  const notes = fallbackNotesForUser(user.user_id);
+  notes.unshift(note);
+  return note;
+}
+
+function updateFallbackOperationalNoteStatus(userId, noteId, status) {
+  const notes = fallbackNotesForUser(userId);
+  const note = notes.find((item) => item.id === noteId);
+  if (!note) return null;
+  note.status = status;
+  note.updated_at = nowIso();
+  return note;
+}
+
+function deleteFallbackOperationalNote(userId, noteId) {
+  const notes = fallbackNotesForUser(userId);
+  const index = notes.findIndex((item) => item.id === noteId);
+  if (index < 0) return null;
+  const [note] = notes.splice(index, 1);
+  return note;
 }
 
 const weeklyReportDays = new Set([
@@ -955,7 +1125,7 @@ async function router(req, res) {
   }
 
   if (req.method === "GET" && url.pathname === "/") {
-    return sendRedirect(res, "/admin/import");
+    return sendRedirect(res, "/executive");
   }
 
   if (req.method === "GET" && routePage(url.pathname)) {
@@ -985,13 +1155,13 @@ async function router(req, res) {
     setCookie(res, "session_id", sessionId);
     return sendJson(res, 200, {
       ok: true,
-      redirectTo: "/composer",
+      redirectTo: "/executive",
       user: { nome: user.nome, turma_id: user.turma_id }
     });
   }
 
   if (req.method === "GET" && url.pathname === "/api/session") {
-    const user = await getSessionUser(req);
+    const user = await resolveProductUser(req, res, { createFallback: true });
     if (!user) return sendJson(res, 200, { authenticated: false });
     return sendJson(res, 200, {
       authenticated: true,
@@ -1000,6 +1170,10 @@ async function router(req, res) {
       connections: await gmailConnectionSummary(user.user_id),
       pendingActions: (await getPendingActionsForUser(user.user_id)).map(serializePendingAction)
     });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/dev/session") {
+    return bootstrapLocalSession(req, res);
   }
 
   if (req.method === "GET" && url.pathname === "/api/weekly-report/settings") {
@@ -1244,6 +1418,179 @@ async function router(req, res) {
     }
   }
 
+  if (req.method === "GET" && url.pathname === "/api/executive/notes") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    try {
+      const notes = await listOperationalNotesForUser(user.user_id);
+      return sendJson(res, 200, {
+        ok: true,
+        storageReady: true,
+        notes: notes.map(serializeOperationalNote)
+      });
+    } catch (error) {
+      return sendJson(res, 200, {
+        ok: true,
+        storageReady: false,
+        fallback: true,
+        notes: fallbackNotesForUser(user.user_id).map(serializeOperationalNote),
+        error: "Supabase sem tabela operational_notes. Usando apontamentos temporarios neste servidor local."
+      });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/executive/notes") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    const payload = normalizeOperationalNoteBody(body);
+    if (!payload.summary) {
+      return sendJson(res, 400, { error: "Resumo do apontamento obrigatorio." });
+    }
+    try {
+      const now = nowIso();
+      const note = await createOperationalNote({
+        id: generateId("note"),
+        user_id: user.user_id,
+        turma_id: user.turma_id,
+        ...payload,
+        status: "open",
+        created_at: now,
+        updated_at: now
+      });
+      await logAction({
+        userId: user.user_id,
+        turmaId: user.turma_id,
+        actionType: "operational_note",
+        toolName: "create_operational_note",
+        status: "success"
+      });
+      return sendJson(res, 200, {
+        ok: true,
+        storageReady: true,
+        note: serializeOperationalNote(note)
+      });
+    } catch (error) {
+      const note = createFallbackOperationalNote(user, payload);
+      await logAction({
+        userId: user.user_id,
+        turmaId: user.turma_id,
+        actionType: "operational_note",
+        toolName: "create_operational_note_fallback",
+        status: "success"
+      });
+      return sendJson(res, 200, {
+        ok: true,
+        storageReady: false,
+        fallback: true,
+        note: serializeOperationalNote(note),
+        warning: "Apontamento salvo temporariamente. Para persistir em producao, aplique o schema do Supabase.",
+        detail: config.isProduction ? undefined : error.message
+      });
+    }
+  }
+
+  const noteStatusMatch = url.pathname.match(/^\/api\/executive\/notes\/([^/]+)\/status$/);
+  if (req.method === "POST" && noteStatusMatch) {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    const status = String(body.status || "").trim();
+    if (!["open", "done", "archived"].includes(status)) {
+      return sendJson(res, 400, { error: "Status invalido." });
+    }
+    try {
+      const note = await updateOperationalNoteStatus(
+        decodeURIComponent(noteStatusMatch[1]),
+        user.user_id,
+        status
+      );
+      if (!note) return sendJson(res, 404, { error: "Apontamento nao encontrado." });
+      return sendJson(res, 200, {
+        ok: true,
+        note: serializeOperationalNote(note)
+      });
+    } catch (error) {
+      const note = updateFallbackOperationalNoteStatus(
+        user.user_id,
+        decodeURIComponent(noteStatusMatch[1]),
+        status
+      );
+      if (!note) return sendJson(res, 404, { error: "Apontamento nao encontrado." });
+      return sendJson(res, 200, {
+        ok: true,
+        storageReady: false,
+        fallback: true,
+        note: serializeOperationalNote(note),
+        warning: "Status atualizado temporariamente. Para persistir em producao, aplique o schema do Supabase.",
+        detail: config.isProduction ? undefined : error.message
+      });
+    }
+  }
+
+  const noteDeleteMatch = url.pathname.match(/^\/api\/executive\/notes\/([^/]+)$/);
+  if (req.method === "DELETE" && noteDeleteMatch) {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const noteId = decodeURIComponent(noteDeleteMatch[1]);
+    try {
+      const note = await deleteOperationalNote(noteId, user.user_id);
+      if (!note) return sendJson(res, 404, { error: "Apontamento nao encontrado." });
+      return sendJson(res, 200, {
+        ok: true,
+        deleted: serializeOperationalNote(note)
+      });
+    } catch (error) {
+      const note = deleteFallbackOperationalNote(user.user_id, noteId);
+      if (!note) return sendJson(res, 404, { error: "Apontamento nao encontrado." });
+      return sendJson(res, 200, {
+        ok: true,
+        storageReady: false,
+        fallback: true,
+        deleted: serializeOperationalNote(note),
+        warning: "Apontamento removido temporariamente. Para persistir em producao, aplique o schema do Supabase.",
+        detail: config.isProduction ? undefined : error.message
+      });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/executive/analyze") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    try {
+      const analysis = await runExecutiveAnalysis(user.user_id, {
+        agentId: body.agentId || "executive_assistant",
+        timeframe: body.timeframe || "30d",
+        query: body.query || "",
+        maxResults: body.maxResults || 200,
+        categories: body.categories || ["primary"],
+        customInstruction: body.customInstruction || ""
+      });
+      await logAction({
+        userId: user.user_id,
+        turmaId: user.turma_id,
+        actionType: "executive_analysis",
+        toolName: "executive_agent_analysis",
+        status: "success"
+      });
+      return sendJson(res, 200, { ok: true, analysis });
+    } catch (error) {
+      await logAction({
+        userId: user.user_id,
+        turmaId: user.turma_id,
+        actionType: "executive_analysis",
+        toolName: "executive_agent_analysis",
+        status: "error"
+      });
+      return sendJson(res, 400, {
+        error: error.message.includes("Gmail not connected")
+          ? "Conecte seu Gmail para gerar a visao executiva."
+          : error.message
+      });
+    }
+  }
+
   if (req.method === "POST" && url.pathname === "/api/admin/import-students") {
     const body = await readBody(req);
     const rows = Array.isArray(body.students) ? body.students : parseImportRows(body.raw || "");
@@ -1279,7 +1626,12 @@ async function router(req, res) {
     const user = await ensureAuth(req, res);
     if (!user) return;
     try {
-      const statePayload = { userId: user.user_id, provider: "gmail", nonce: generateId("state") };
+      const statePayload = {
+        userId: user.user_id,
+        provider: "gmail",
+        nonce: generateId("state"),
+        returnTo: safeReturnTo(url.searchParams.get("returnTo"))
+      };
       await createOAuthState({
         nonce: statePayload.nonce,
         user_id: user.user_id,
@@ -1300,7 +1652,9 @@ async function router(req, res) {
       const stateExists = await consumeOAuthState(payload.nonce);
       if (!stateExists) throw new Error("OAuth state expired");
       await saveGmailConnection({ userId: payload.userId, code });
-      return sendRedirect(res, "/composer?gmail=connected");
+      const returnTo = safeReturnTo(payload.returnTo);
+      const separator = returnTo.includes("?") ? "&" : "?";
+      return sendRedirect(res, `${returnTo}${separator}gmail=connected`);
     } catch (error) {
       return sendRedirect(res, `/connections?error=${encodeURIComponent(error.message)}`);
     }
