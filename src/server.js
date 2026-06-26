@@ -167,10 +167,10 @@ async function setSessionForUser(res, user) {
 
 async function resolveProductUser(req, res, { createFallback = true } = {}) {
   const existingUser = await getSessionUser(req);
-  if (config.isProduction) return existingUser;
 
   const connectedUser = await getLatestGmailConnectedUser();
   if (existingUser) {
+    if (config.isProduction) return existingUser;
     const existingGmail = await getGmailConnectionStatus(existingUser.user_id);
     if (existingGmail || !connectedUser || connectedUser.user_id === existingUser.user_id) {
       return existingUser;
@@ -184,7 +184,7 @@ async function resolveProductUser(req, res, { createFallback = true } = {}) {
     return connectedUser;
   }
 
-  if (!createFallback) return null;
+  if (!createFallback || config.isProduction) return null;
   const fallbackUser = await getOrCreateLocalFallbackUser();
   await setSessionForUser(res, fallbackUser);
   return fallbackUser;
