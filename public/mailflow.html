@@ -967,14 +967,14 @@ document.querySelectorAll(".modebtn").forEach(b=>b.addEventListener("click",()=>
   try{
     const d=await api("/api/session");
     if(!d.authenticated){
-      window.location.href="/connections?returnTo=/mailflow";
+      document.getElementById("scanInfo").textContent="não autenticado";
+      document.getElementById("readout").innerHTML='<span class="blip"></span><span>você precisa <a href="/connections?returnTo=/mailflow" style="color:var(--c-aguardando)">conectar sua conta</a> para varrer a caixa.</span>';
+      document.getElementById("runBtn").onclick=()=>{ window.location.href="/connections?returnTo=/mailflow"; };
       return;
     }
     const gmail=d.connections||{};
     document.getElementById("leftFoot").textContent=(gmail.googleEmail||d.user?.nome||"")+" · leitura local, nada sai sem seu ok";
-  }catch{
-    window.location.href="/connections?returnTo=/mailflow";
-  }
+  }catch{}
 })();
 </script>
 </body>
