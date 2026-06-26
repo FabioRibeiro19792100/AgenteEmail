@@ -1955,8 +1955,20 @@ async function router(req, res) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/google/gmail/start") {
-    const user = await ensureAuth(req, res);
-    if (!user) return;
+    let user = await resolveProductUser(req, res, { createFallback: false });
+    if (!user) {
+      // No session — create a new account so OAuth has a user_id to bind to
+      try {
+        const anonEmail = `user-${generateId("anon")}@mailflow.app`;
+        const created = await importStudents([{ nome: "Usuário", turma: "MailFlow", email: anonEmail, papel: "aluno", instituicao: "MailFlow" }]);
+        if (!created.length) throw new Error("Nao foi possivel criar conta.");
+        user = await getUserByEmail(anonEmail);
+        if (!user) throw new Error("Conta nao encontrada.");
+        await setSessionForUser(res, user);
+      } catch (error) {
+        return sendJson(res, 400, { error: error.message });
+      }
+    }
     try {
       const statePayload = {
         userId: user.user_id,
