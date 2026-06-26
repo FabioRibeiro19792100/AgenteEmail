@@ -810,10 +810,7 @@ async function loadFeed(){
     document.getElementById("scanInfo").textContent=live+" mensagens varridas";
     document.getElementById("readout").innerHTML='<span class="blip"></span><span>varredura concluída · escolha uma lente para acender as evidências.</span>';
   }catch(err){
-    if(err.message.includes("401")||err.message.includes("403")){
-      window.location.href="/connections?returnTo=/mailflow"; return;
-    }
-    document.getElementById("readout").textContent="erro: "+err.message;
+    document.getElementById("readout").innerHTML='<span class="blip"></span><span>erro ao varrer — <a href="/connections?returnTo=/mailflow" style="color:var(--c-aguardando)">reconectar conta</a></span>';
     document.getElementById("scanInfo").textContent="erro";
   }finally{btn.disabled=false; btn.textContent="varrer agora";}
 }
