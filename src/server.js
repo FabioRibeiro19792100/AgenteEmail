@@ -2153,6 +2153,11 @@ async function router(req, res) {
     return sendJson(res, 200, { ok: true });
   }
 
+  if (req.method === "GET" && url.pathname === "/signout") {
+    clearCookie(res, "session_id");
+    return sendRedirect(res, "/mailflow");
+  }
+
   return sendJson(res, 404, { error: "Rota nao encontrada." });
 }
 
