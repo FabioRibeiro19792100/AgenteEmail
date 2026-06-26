@@ -353,7 +353,7 @@ function inviteLink(req, inviteId) {
   return `${requestOrigin(req)}/invite/${inviteId}`;
 }
 
-function safeReturnTo(value, fallback = "/executive") {
+function safeReturnTo(value, fallback = "/mailflow") {
   const target = String(value || "").trim();
   if (!target || !target.startsWith("/") || target.startsWith("//")) return fallback;
   if (target.includes("\n") || target.includes("\r")) return fallback;
@@ -1164,7 +1164,7 @@ async function router(req, res) {
   }
 
   if (req.method === "GET" && url.pathname === "/") {
-    return sendRedirect(res, "/executive");
+    return sendRedirect(res, "/mailflow");
   }
 
   if (req.method === "GET" && routePage(url.pathname)) {

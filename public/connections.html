@@ -43,7 +43,10 @@
         el("status").textContent = statusBits.join(" ");
       }
 
-      el("gmailBtn").onclick = () => location.href = "/api/google/gmail/start?returnTo=/executive";
+      el("gmailBtn").onclick = () => {
+        const returnTo = new URLSearchParams(location.search).get("returnTo") || "/mailflow";
+        location.href = "/api/google/gmail/start?returnTo=" + encodeURIComponent(returnTo);
+      };
       el("revokeBtn").onclick = async () => {
         await api("/api/google/gmail/revoke", { method: "POST", body: "{}" });
         refresh();
