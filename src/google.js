@@ -396,6 +396,43 @@ export async function markAsRead(userId, messageId) {
   return { messageId };
 }
 
+export async function trashEmail(userId, messageId) {
+  await gmailJsonRequest(userId, `messages/${messageId}/trash`, {
+    method: "POST",
+    requiredScopes: ["https://www.googleapis.com/auth/gmail.modify"]
+  });
+  return { messageId };
+}
+
+export async function snoozeEmail(userId, messageId, snoozeDays = 3) {
+  const snoozeDate = new Date(Date.now() + snoozeDays * 24 * 60 * 60 * 1000);
+  const dateLabel = snoozeDate.toISOString().split("T")[0];
+  const labelName = `MailFlow/Adiado/${dateLabel}`;
+  const labelId = await getOrCreateLabelId(userId, labelName);
+  await gmailJsonRequest(userId, `messages/${messageId}/modify`, {
+    method: "POST",
+    requiredScopes: ["https://www.googleapis.com/auth/gmail.modify"],
+    body: { addLabelIds: [labelId], removeLabelIds: ["INBOX"] }
+  });
+  return { messageId, snoozedUntil: dateLabel, label: labelName };
+}
+
+export async function batchModifyEmails(userId, messageIds, { addLabelIds = [], removeLabelIds = [] } = {}) {
+  const accessToken = await getValidGmailAccessToken(userId, ["https://www.googleapis.com/auth/gmail.modify"]);
+  const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/batchModify", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ ids: messageIds, addLabelIds, removeLabelIds })
+  });
+  if (!response.ok) {
+    throw new Error(`Gmail batch modify failed: ${await response.text()}`);
+  }
+  return { count: messageIds.length };
+}
+
 export async function revokeGmailConnection(userId) {
   return Boolean(await revokeGoogleConnectionRecord(userId, "gmail"));
 }
