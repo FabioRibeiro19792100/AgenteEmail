@@ -1,4 +1,5 @@
 import { readEmail, searchEmails } from "./google.js";
+import { getActiveInstructions } from "./db.js";
 
 const DEFAULT_INSIGHT_SCAN_RESULTS = 200;
 const MAX_INSIGHT_SCAN_RESULTS = 500;
@@ -1493,6 +1494,294 @@ export async function prepareReplyForEmail(userId, messageId, instruction = "") 
         references: target.references,
         inReplyTo: target.messageIdHeader
       }
+    }
+  };
+}
+
+// ── Modo 1: Briefing diário ────────────────────────────────────────────────
+export async function runDailyBriefing(userId) {
+  const plan = buildExecutiveQueryPlan({
+    agentId: "executive_assistant",
+    timeframe: "1d",
+    maxResults: 60,
+    categories: ["primary"]
+  });
+  const collected = await searchWithPlan(userId, plan);
+  const ranked = rankEmails(collected.emails, plan.profile.defaultQuestion, plan.analysis);
+  const emails = ranked.filter(e => e._kind !== "automatico").slice(0, 30);
+  const context = { analysis: plan.analysis, queryPlan: plan.queries, emails, totalScanned: collected.emails.length, searchFailures: collected.failures };
+
+  let report;
+  try {
+    const raw = await callOpenAI(buildExecutivePrompt({ profile: plan.profile, context, customInstruction: "Foca em emails das ultimas 24h. Resume o que e critico hoje, o que precisa de resposta e o que pode ser ignorado. Maximo 5 achados." }));
+    report = normalizeExecutiveReport(plan.profile, parseJsonObject(raw), context);
+  } catch {
+    report = fallbackExecutiveReport(plan.profile, context);
+  }
+
+  return {
+    mode: "briefing",
+    generatedAt: new Date().toISOString(),
+    emailsScanned: collected.emails.length,
+    report,
+    sources: emails.map((e, i) => ({ index: i + 1, id: e.id, subject: e.subject, from: e.from, date: e.date, kind: e._kind }))
+  };
+}
+
+// ── Modo 2: Triagem silenciosa ─────────────────────────────────────────────
+export async function runSilentTriage(userId) {
+  const plan = buildExecutiveQueryPlan({
+    agentId: "executive_assistant",
+    timeframe: "7d",
+    maxResults: 100,
+    categories: ["primary", "promotions", "social"]
+  });
+  const collected = await searchWithPlan(userId, plan);
+  const ranked = rankEmails(collected.emails, "triagem automatica", { focus: "general", days: 7 });
+
+  const toArchive = ranked.filter(e => e._kind === "automatico" && e._score < 0).slice(0, 40).map(e => e.id);
+  const toLabel = ranked.filter(e => e._kind === "comercial" && e._score >= 5).slice(0, 20);
+  const toMarkRead = ranked.filter(e => e._kind === "automatico" && !toArchive.includes(e.id)).slice(0, 20).map(e => e.id);
+
+  return {
+    mode: "triage",
+    generatedAt: new Date().toISOString(),
+    scanned: collected.emails.length,
+    actions: {
+      toArchive,
+      toLabel: toLabel.map(e => ({ id: e.id, subject: e.subject, from: e.from, label: "MailFlow/Comercial" })),
+      toMarkRead
+    },
+    summary: `${toArchive.length} para arquivar, ${toLabel.length} para labelar como Comercial, ${toMarkRead.length} para marcar como lido.`
+  };
+}
+
+// ── Modo 3: Inbox zero — próximo email para triagem ──────────────────────
+export async function runInboxZeroNext(userId, { skipIds = [] } = {}) {
+  const plan = buildInsightQueryPlan({ question: "emails nao lidos que precisam de atencao", timeframe: "14d", maxResults: 80, categories: ["primary"] });
+  const collected = await searchWithPlan(userId, plan);
+  const ranked = rankEmails(collected.emails, "email que precisa de atencao", plan.analysis);
+  const queue = ranked.filter(e => e._kind !== "automatico" && !skipIds.includes(e.id));
+  const next = queue[0] || null;
+
+  return {
+    mode: "inbox_zero",
+    remaining: queue.length,
+    total: collected.emails.length,
+    next: next ? {
+      id: next.id,
+      subject: next.subject,
+      from: next.from,
+      date: next.date,
+      snippet: next.snippet,
+      kind: next._kind,
+      score: next._score
+    } : null
+  };
+}
+
+// ── Feed de decisões — 5 camadas em paralelo ──────────────────────────────
+export async function buildDecisionFeed(userId, { timeframe = "7d", maxEmails = 100 } = {}) {
+  const now = new Date();
+
+  // Carrega instruções ativas do usuário e injeta no contexto
+  let userInstructions = [];
+  try {
+    userInstructions = await getActiveInstructions(userId);
+  } catch { /* sem instrucoes */ }
+  const instructionBlock = userInstructions.length
+    ? "\n\nINSTRUCOES DO USUARIO (siga sempre):\n" + userInstructions.map((i, n) => `${n+1}. ${i.instruction}`).join("\n")
+    : "";
+
+  async function getUrgent() {
+    try {
+      const plan = buildInsightQueryPlan({ question: "emails urgentes que precisam de resposta hoje", timeframe, maxResults: maxEmails, categories: ["primary"] });
+      const collected = await searchWithPlan(userId, plan);
+      const ranked = rankEmails(collected.emails, "urgente responder hoje", plan.analysis);
+      // critério: email de pessoa real, não lido, score >= 2, não automatico
+      const candidates = ranked
+        .filter(e => classifyEmail(e) !== "automatico")
+        .filter(e => Array.isArray(e.labelIds) && e.labelIds.includes("UNREAD"))
+        .filter(e => e._score >= 2)
+        .slice(0, 5);
+      return candidates.map(e => ({
+        id: `urgent-${e.id}`,
+        kind: "urgent",
+        priority: 1,
+        title: e.subject,
+        from: e.from,
+        date: e.date,
+        snippet: e.snippet,
+        emailId: e.id,
+        description: `${e.from} — não lido${e.date ? `, ${new Date(e.date).toLocaleDateString("pt-BR")}` : ""}`,
+        actions: ["reply", "snooze", "ignore"]
+      }));
+    } catch { return []; }
+  }
+
+  async function getFollowups() {
+    try {
+      const plan = buildInsightQueryPlan({ question: "emails que estou aguardando resposta follow-up", timeframe, maxResults: maxEmails, categories: ["primary"] });
+      const collected = await searchWithPlan(userId, plan);
+      const ranked = rankEmails(collected.emails, "aguardando retorno follow-up pendente", plan.analysis);
+      // critério: email de pessoa real, mais de 3 dias sem resposta, não automatico
+      const cutoff = now.getTime() - 3 * 86400000;
+      const candidates = ranked
+        .filter(e => classifyEmail(e) !== "automatico")
+        .filter(e => { const t = new Date(e.date).getTime(); return t && t < cutoff; })
+        .filter(e => e._score >= 1)
+        .slice(0, 5);
+      return candidates.map(e => {
+        const daysOld = Math.round((now.getTime() - new Date(e.date).getTime()) / 86400000);
+        return {
+          id: `followup-${e.id}`,
+          kind: "followup",
+          priority: 2,
+          title: e.subject,
+          from: e.from,
+          date: e.date,
+          snippet: e.snippet,
+          emailId: e.id,
+          description: `${e.from} — ${daysOld} dia(s) sem retorno`,
+          actions: ["reply", "snooze", "ignore"]
+        };
+      });
+    } catch { return []; }
+  }
+
+  async function getNoise() {
+    try {
+      const plan = buildInsightQueryPlan({ question: "newsletters automaticos ruido inbox", timeframe, maxResults: maxEmails, categories: ["primary", "promotions", "social"] });
+      const collected = await searchWithPlan(userId, plan);
+      const noise = collected.emails.filter(e => {
+        const classified = classifyEmail(e);
+        return classified === "automatico";
+      });
+      const deduped = [...new Map(noise.map(e => [e.id, e])).values()].slice(0, 50);
+      if (!deduped.length) return [];
+      return [{
+        id: "noise-batch",
+        kind: "noise",
+        priority: 3,
+        title: `${deduped.length} emails de ruído no inbox`,
+        description: `Newsletters, notificações automáticas e confirmações que não precisam de ação.`,
+        emailIds: deduped.map(e => e.id),
+        samples: deduped.map(e => ({ subject: e.subject, from: e.from, date: e.date, emailId: e.id })),
+        actions: ["archive_all", "view_list"]
+      }];
+    } catch { return []; }
+  }
+
+  async function getDraftApprovals() {
+    try {
+      const plan = buildInsightQueryPlan({ question: "emails comerciais clientes que precisam de resposta", timeframe: "14d", maxResults: 60, categories: ["primary"] });
+      const collected = await searchWithPlan(userId, plan);
+      const ranked = rankEmails(collected.emails, "cliente proposta responder", plan.analysis);
+      const candidates = ranked
+        .filter(e => e._kind === "comercial" && e._score >= 6)
+        .filter(e => !includesAny(emailText(e), [...AUTOMATED_TERMS, ...CALENDAR_TERMS, "canceled", "cancelled", "cancelado", "notes:", "gemini", "noreply", "no-reply"]))
+        .slice(0, 3);
+      const results = [];
+      for (const email of candidates) {
+        try {
+          const draft = await callOpenAI(buildWritePrompt("reply_email", `Responda este email de forma profissional e objetiva`, email));
+          results.push({
+            id: `draft-${email.id}`,
+            kind: "draft",
+            priority: 2,
+            title: email.subject,
+            from: email.from,
+            date: email.date,
+            emailId: email.id,
+            draftText: draft,
+            description: `Rascunho pronto para enviar. Revise e aprove.`,
+            actions: ["send", "edit", "discard"]
+          });
+        } catch { /* pula se falhar */ }
+      }
+      return results;
+    } catch { return []; }
+  }
+
+  async function getHealthMetrics() {
+    try {
+      const plan = buildInsightQueryPlan({ question: "volume inbox semana", timeframe: "7d", maxResults: 200, categories: ["primary", "promotions", "social"] });
+      const collected = await searchWithPlan(userId, plan);
+      const emails = collected.emails;
+      const unread = emails.filter(e => Array.isArray(e.labelIds) && e.labelIds.includes("UNREAD")).length;
+      const noise = emails.filter(e => classifyEmail(e) === "automatico").length;
+      const commercial = emails.filter(e => classifyEmail(e) === "comercial").length;
+      return [{
+        id: "health",
+        kind: "health",
+        priority: 5,
+        title: "Saúde do inbox esta semana",
+        metrics: {
+          total: emails.length,
+          unread,
+          noise,
+          commercial,
+          noiseRatio: emails.length ? Math.round(noise / emails.length * 100) : 0
+        },
+        description: `${emails.length} emails · ${unread} não lidos · ${noise} ruídos (${emails.length ? Math.round(noise / emails.length * 100) : 0}%)`,
+        actions: []
+      }];
+    } catch { return []; }
+  }
+
+  async function getOthers(excludeIds) {
+    try {
+      const plan = buildInsightQueryPlan({ question: "emails recentes inbox", timeframe, maxResults: maxEmails, categories: ["primary"] });
+      const collected = await searchWithPlan(userId, plan);
+      const others = collected.emails
+        .filter(e => !excludeIds.has(e.id))
+        .filter(e => classifyEmail(e) !== "automatico")
+        .slice(0, 20);
+      return others.map(e => ({
+        id: `others-${e.id}`,
+        kind: "others",
+        priority: 4,
+        title: e.subject,
+        from: e.from,
+        date: e.date,
+        snippet: e.snippet,
+        emailId: e.id
+      }));
+    } catch { return []; }
+  }
+
+  const [urgent, followups, noise, drafts, health] = await Promise.allSettled([
+    getUrgent(), getFollowups(), getNoise(), getDraftApprovals(), getHealthMetrics()
+  ]);
+
+  // coleta IDs já classificados para excluir de "outros"
+  const classifiedIds = new Set([
+    ...(urgent.status === "fulfilled" ? urgent.value.map(i => i.emailId) : []),
+    ...(followups.status === "fulfilled" ? followups.value.map(i => i.emailId) : []),
+    ...(drafts.status === "fulfilled" ? drafts.value.map(i => i.emailId) : []),
+    ...((noise.status === "fulfilled" && noise.value[0]?.emailIds) || [])
+  ].filter(Boolean));
+
+  const others = await getOthers(classifiedIds);
+
+  const items = [
+    ...(urgent.status === "fulfilled" ? urgent.value : []),
+    ...(drafts.status === "fulfilled" ? drafts.value : []),
+    ...(followups.status === "fulfilled" ? followups.value : []),
+    ...(noise.status === "fulfilled" ? noise.value : []),
+    ...others,
+    ...(health.status === "fulfilled" ? health.value : [])
+  ].sort((a, b) => a.priority - b.priority);
+
+  return {
+    generatedAt: now.toISOString(),
+    items,
+    summary: {
+      urgent: urgent.status === "fulfilled" ? urgent.value.length : 0,
+      followups: followups.status === "fulfilled" ? followups.value.length : 0,
+      noise: noise.status === "fulfilled" && noise.value[0] ? noise.value[0].emailIds?.length || 0 : 0,
+      drafts: drafts.status === "fulfilled" ? drafts.value.length : 0,
+      others: others.length
     }
   };
 }

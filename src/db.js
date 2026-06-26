@@ -207,6 +207,38 @@ export async function updatePendingAction(actionId, patch) {
   return rows[0] || null;
 }
 
+/* ── Instruções do agente ──────────────────────────────────────── */
+
+export async function getActiveInstructions(userId) {
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = await selectRows("agent_instructions", {
+    filters: {
+      user_id: eq(userId),
+      active: "eq.true",
+      applies_from: `lte.${today}`
+    },
+    orderBy: "applies_from.asc"
+  });
+  return rows;
+}
+
+export async function saveInstruction(userId, { instruction, appliesFrom }) {
+  const id = generateId("ainstr");
+  const rows = await insertRows("agent_instructions", [{
+    id,
+    user_id: userId,
+    instruction,
+    applies_from: appliesFrom || new Date().toISOString().slice(0, 10),
+    active: true,
+    created_at: nowIso()
+  }]);
+  return rows[0];
+}
+
+export async function deleteInstruction(instructionId, userId) {
+  return deleteRows("agent_instructions", { id: eq(instructionId), user_id: eq(userId) });
+}
+
 export async function listOperationalNotesForUser(userId) {
   return selectRows("operational_notes", {
     filters: { user_id: eq(userId) },
