@@ -73,7 +73,15 @@
   .lens:focus-visible{outline:2px solid var(--c-rascunho);outline-offset:2px;}
   .lens .bar{grid-column:1 / -1;height:3px;border-radius:2px;background:var(--hair-soft);margin-top:8px;overflow:hidden;}
   .lens .bar i{display:block;height:100%;width:var(--w,0%);background:var(--lc,var(--ink-4));border-radius:2px;opacity:.6;transition:width .4s ease;}
-  .left .foot{padding:14px 18px;border-top:1px solid var(--hair-soft);font-family:var(--mono);font-size:10px;color:var(--ink-4);letter-spacing:.05em;line-height:1.6;}
+  .left .foot{padding:10px 12px;border-top:1px solid var(--hair-soft);}
+  .user-chip{display:grid;grid-template-columns:32px 1fr auto;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;border:1px solid var(--hair-soft);background:#0a111d;cursor:default;}
+  .user-chip .av{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#1a3a5c,#0d2240);display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;font-size:13px;color:var(--c-aguardando);flex:none;border:1px solid color-mix(in srgb,var(--c-aguardando) 25%,transparent);}
+  .user-chip .info{min-width:0;}
+  .user-chip .uname{font-weight:600;font-size:12px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .user-chip .uemail{font-family:var(--mono);font-size:9.5px;color:var(--ink-4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}
+  .logout-btn{width:28px;height:28px;border-radius:7px;border:1px solid var(--hair);background:transparent;color:var(--ink-4);cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none;transition:.13s;}
+  .logout-btn:hover{color:var(--c-urgente);border-color:color-mix(in srgb,var(--c-urgente) 40%,transparent);background:color-mix(in srgb,var(--c-urgente) 8%,transparent);}
+  .logout-btn svg{width:14px;height:14px;}
   .inv{width:100%;text-align:left;cursor:pointer;display:grid;grid-template-columns:24px 1fr;gap:11px;align-items:start;padding:9px 11px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--ink-2);margin-bottom:2px;transition:background .15s,border-color .15s,color .15s;}
   .inv:hover{background:#101a2a;color:var(--ink);}
   .inv .ico{width:24px;height:24px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex:none;margin-top:2px;color:var(--ic);background:color-mix(in srgb,var(--ic) 15%,transparent);border:1px solid color-mix(in srgb,var(--ic) 30%,transparent);}
@@ -260,7 +268,18 @@
         <div class="eyebrow">Agentes investigadores</div>
       </div>
     </nav>
-    <div class="foot" id="leftFoot">leitura local · nada sai sem seu ok</div>
+    <div class="foot">
+      <div class="user-chip">
+        <div class="av" id="userAv">?</div>
+        <div class="info">
+          <div class="uname" id="userName">—</div>
+          <div class="uemail" id="userEmail">não autenticado</div>
+        </div>
+        <button class="logout-btn" id="logoutBtn" title="Sair">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+      </div>
+    </div>
   </aside>
 
   <!-- CENTER -->
@@ -967,11 +986,22 @@ document.querySelectorAll(".modebtn").forEach(b=>b.addEventListener("click",()=>
       document.getElementById("scanInfo").textContent="não autenticado";
       document.getElementById("readout").innerHTML='<span class="blip"></span><span>você precisa <a href="/connections?returnTo=/mailflow" style="color:var(--c-aguardando)">conectar sua conta</a> para varrer a caixa.</span>';
       document.getElementById("runBtn").onclick=()=>{ window.location.href="/connections?returnTo=/mailflow"; };
+      document.getElementById("userEmail").textContent="não autenticado";
+      document.getElementById("userName").textContent="—";
       return;
     }
     const gmail=d.connections||{};
-    document.getElementById("leftFoot").textContent=(gmail.googleEmail||d.user?.nome||"")+" · leitura local, nada sai sem seu ok";
+    const email=gmail.googleEmail||d.user?.email||"";
+    const nome=d.user?.nome||email.split("@")[0]||"usuário";
+    const av=nome.charAt(0).toUpperCase();
+    document.getElementById("userAv").textContent=av;
+    document.getElementById("userName").textContent=nome;
+    document.getElementById("userEmail").textContent=email;
   }catch{}
+  document.getElementById("logoutBtn").addEventListener("click",async()=>{
+    await api("/api/logout",{method:"POST"}).catch(()=>{});
+    window.location.href="/connections";
+  });
 })();
 </script>
 </body>
