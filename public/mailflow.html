@@ -810,6 +810,9 @@ async function loadFeed(){
     document.getElementById("scanInfo").textContent=live+" mensagens varridas";
     document.getElementById("readout").innerHTML='<span class="blip"></span><span>varredura concluída · escolha uma lente para acender as evidências.</span>';
   }catch(err){
+    if(err.message.includes("401")||err.message.includes("403")){
+      window.location.href="/connections?returnTo=/mailflow"; return;
+    }
     document.getElementById("readout").textContent="erro: "+err.message;
     document.getElementById("scanInfo").textContent="erro";
   }finally{btn.disabled=false; btn.textContent="varrer agora";}
@@ -963,10 +966,15 @@ document.querySelectorAll(".modebtn").forEach(b=>b.addEventListener("click",()=>
 (async()=>{
   try{
     const d=await api("/api/session");
-    if(!d.authenticated) try{await api("/api/dev/session",{method:"POST",body:"{}"});}catch{}
+    if(!d.authenticated){
+      window.location.href="/connections?returnTo=/mailflow";
+      return;
+    }
     const gmail=d.connections||{};
     document.getElementById("leftFoot").textContent=(gmail.googleEmail||d.user?.nome||"")+" · leitura local, nada sai sem seu ok";
-  }catch{}
+  }catch{
+    window.location.href="/connections?returnTo=/mailflow";
+  }
 })();
 </script>
 </body>
