@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MailFlow · Raio-X</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#070b12;
+    --bg-2:#0a0f1a;
+    --panel:#0c1320;
+    --panel-2:#0f1828;
+    --hair:#1a2536;
+    --hair-soft:#141d2c;
+    --cell:#162132;
+    --cell-dark:#0c121d;
+    --ink:#e7eef8;
+    --ink-2:#9fb0c7;
+    --ink-3:#5d6e87;
+    --ink-4:#3c4a60;
+    --c-responder:#f2c14e;
+    --c-urgente:#ff5e57;
+    --c-aguardando:#37d3c9;
+    --c-arquivar:#6f8aa8;
+    --c-ruido:#9b8cff;
+    --c-rascunho:#5b9cff;
+    --cell-size:26px;
+    --cell-gap:7px;
+    --display:'Space Grotesk',system-ui,sans-serif;
+    --body:'Inter',system-ui,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:radial-gradient(1200px 600px at 60% -10%,#0d1828 0%,transparent 60%),var(--bg);
+    color:var(--ink);font-family:var(--body);font-size:14px;
+    -webkit-font-smoothing:antialiased;overflow:hidden;
+  }
+  .app{height:100vh;display:grid;grid-template-columns:248px minmax(0,1fr) 396px;gap:0;}
+  .col{height:100vh;min-height:0;display:flex;flex-direction:column;}
+  .left{background:linear-gradient(180deg,var(--panel) 0%,var(--bg-2) 100%);border-right:1px solid var(--hair);}
+  .center{background:transparent;position:relative;}
+  .right{background:linear-gradient(180deg,var(--panel) 0%,var(--bg-2) 100%);border-left:1px solid var(--hair);}
+  .brand{padding:20px 22px 16px;border-bottom:1px solid var(--hair-soft);}
+  .brand .mark{display:flex;align-items:center;gap:9px;}
+  .mark .dot{width:11px;height:11px;border-radius:2px;background:var(--c-aguardando);box-shadow:0 0 10px var(--c-aguardando),0 0 22px rgba(55,211,201,.5);animation:beat 2.4s ease-in-out infinite;}
+  .mark .name{font-family:var(--display);font-weight:700;letter-spacing:.16em;font-size:13px;text-transform:uppercase;}
+  .brand .sub{margin-top:9px;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);letter-spacing:.04em;line-height:1.5;}
+  .brand .sub b{color:var(--ink-2);font-weight:500;}
+  .brand .sub .run-lnk{color:var(--c-aguardando);cursor:pointer;text-decoration:underline;text-underline-offset:2px;background:none;border:none;font-family:var(--mono);font-size:10.5px;padding:0;}
+  .brand .sub .run-lnk:disabled{opacity:.4;cursor:not-allowed;}
+  .modebar{display:flex;gap:5px;padding:14px 14px 0;}
+  .modebtn{flex:1;font-family:var(--body);font-size:11.5px;font-weight:500;letter-spacing:.01em;color:var(--ink-3);background:#0b1320;border:1px solid var(--hair-soft);border-radius:8px;padding:8px 8px;cursor:pointer;transition:background .14s,color .14s,border-color .14s;}
+  .modebtn:hover{color:var(--ink);}
+  .modebtn.on{background:#13203a;color:var(--ink);border-color:#26384f;}
+  .modebtn:focus-visible{outline:2px solid var(--c-rascunho);outline-offset:2px;}
+  .lgroup[hidden]{display:none;}
+  .lenses{flex:1;overflow-y:auto;padding:14px 12px;}
+  .lenses .eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-4);padding:6px 10px 10px;}
+  .lens{width:100%;text-align:left;cursor:pointer;display:grid;grid-template-columns:14px 1fr auto;align-items:center;gap:10px;padding:10px 11px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--ink-2);font-family:var(--body);font-size:13px;transition:background .15s ease,border-color .15s ease,color .15s ease;margin-bottom:2px;}
+  .lens:hover{background:#101a2a;color:var(--ink);}
+  .lens .lns-dot{width:9px;height:9px;border-radius:50%;background:var(--lc,var(--ink-4));box-shadow:0 0 0 0 transparent;}
+  .lens .lns-name{font-weight:500;line-height:1.2;}
+  .lens .lns-count{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);font-weight:500;}
+  .lens[aria-pressed="true"]{background:linear-gradient(90deg,color-mix(in srgb,var(--lc) 16%,transparent),transparent 90%);border-color:color-mix(in srgb,var(--lc) 40%,transparent);color:var(--ink);}
+  .lens[aria-pressed="true"] .lns-dot{box-shadow:0 0 8px var(--lc),0 0 16px color-mix(in srgb,var(--lc) 60%,transparent);}
+  .lens[aria-pressed="true"] .lns-count{color:var(--ink);}
+  .lens:focus-visible{outline:2px solid var(--c-rascunho);outline-offset:2px;}
+  .lens .bar{grid-column:1 / -1;height:3px;border-radius:2px;background:var(--hair-soft);margin-top:8px;overflow:hidden;}
+  .lens .bar i{display:block;height:100%;width:var(--w,0%);background:var(--lc,var(--ink-4));border-radius:2px;opacity:.6;transition:width .4s ease;}
+  .left .foot{padding:14px 18px;border-top:1px solid var(--hair-soft);font-family:var(--mono);font-size:10px;color:var(--ink-4);letter-spacing:.05em;line-height:1.6;}
+  .inv{width:100%;text-align:left;cursor:pointer;display:grid;grid-template-columns:24px 1fr;gap:11px;align-items:start;padding:9px 11px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--ink-2);margin-bottom:2px;transition:background .15s,border-color .15s,color .15s;}
+  .inv:hover{background:#101a2a;color:var(--ink);}
+  .inv .ico{width:24px;height:24px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex:none;margin-top:2px;color:var(--ic);background:color-mix(in srgb,var(--ic) 15%,transparent);border:1px solid color-mix(in srgb,var(--ic) 30%,transparent);}
+  .inv .ico svg{width:14px;height:14px;}
+  .inv .itx{min-width:0;}
+  .inv .inm{display:block;font-weight:500;font-size:13px;line-height:1.3;}
+  .inv .itag{display:block;font-family:var(--mono);font-size:9px;color:var(--ink-4);margin-top:3px;letter-spacing:.02em;line-height:1.4;}
+  .inv[aria-pressed="true"]{background:linear-gradient(90deg,color-mix(in srgb,var(--ic) 16%,transparent),transparent 92%);border-color:color-mix(in srgb,var(--ic) 42%,transparent);color:var(--ink);}
+  .inv[aria-pressed="true"] .ico{box-shadow:0 0 12px color-mix(in srgb,var(--ic) 45%,transparent);}
+  .inv:focus-visible{outline:2px solid var(--c-rascunho);outline-offset:2px;}
+  .report{padding:2px 2px 26px;}
+  .report .headline{font-family:var(--display);font-size:18px;font-weight:600;line-height:1.22;padding:14px 12px 6px;color:var(--ink);}
+  .report .lead{font-family:var(--mono);font-size:11px;line-height:1.65;color:var(--ink-2);padding:0 12px 10px;}
+  .report .seclabel{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-4);padding:10px 12px 4px;}
+  .finding{display:grid;grid-template-columns:9px 1fr;gap:11px;align-items:start;padding:11px 12px;border-radius:9px;border:1px solid transparent;transition:background .14s,border-color .14s;cursor:default;}
+  .finding[data-id]{cursor:pointer;}
+  .finding:hover,.finding.hot{background:#0e1726;border-color:color-mix(in srgb,var(--lc) 35%,transparent);}
+  .finding .fd{width:7px;height:7px;border-radius:50%;background:var(--lc);box-shadow:0 0 8px var(--lc);margin-top:6px;}
+  .finding .ft{font-size:12.5px;line-height:1.55;color:var(--ink-2);}
+  .finding .ft b{color:var(--ink);font-weight:600;}
+  .finding .ft em{font-style:normal;color:var(--ink-3);}
+  .report .acts-row{display:flex;flex-wrap:wrap;gap:8px;padding:14px 12px 4px;}
+  .pbtn{font-family:var(--body);font-size:11.5px;font-weight:500;cursor:pointer;padding:8px 12px;border-radius:8px;border:1px solid color-mix(in srgb,var(--lc) 35%,transparent);background:color-mix(in srgb,var(--lc) 12%,#0c1422);color:var(--ink);display:inline-flex;align-items:center;gap:7px;transition:filter .14s,background .14s;}
+  .pbtn:hover{filter:brightness(1.12);}
+  .pbtn.ghost{background:#0e1726;border-color:var(--hair);color:var(--ink-2);}
+  .pbtn.ghost:hover{color:var(--ink);background:#13203a;}
+  .pbtn:focus-visible{outline:2px solid var(--c-rascunho);outline-offset:2px;}
+  .report .evnote{font-family:var(--mono);font-size:10px;color:var(--ink-4);padding:12px 12px 0;letter-spacing:.03em;}
+  .scope-head{padding:20px 28px 14px;display:flex;align-items:flex-end;justify-content:space-between;gap:20px;border-bottom:1px solid var(--hair-soft);}
+  .scope-title{font-family:var(--display);font-weight:600;font-size:19px;letter-spacing:-.01em;line-height:1.1;}
+  .scope-title small{display:block;font-family:var(--mono);font-weight:400;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:7px;}
+  .scope-stats{display:flex;gap:26px;align-items:flex-end;}
+  .stat{text-align:right;}
+  .stat .v{font-family:var(--mono);font-size:18px;font-weight:600;color:var(--ink);line-height:1;}
+  .stat .l{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-4);margin-top:6px;}
+  .stat .v.live{color:var(--c-aguardando);}
+  .run-btn{font-family:var(--body);font-size:11.5px;font-weight:600;cursor:pointer;padding:8px 14px;border-radius:8px;border:1px solid color-mix(in srgb,var(--c-aguardando) 40%,transparent);background:color-mix(in srgb,var(--c-aguardando) 12%,#0c1422);color:var(--c-aguardando);transition:filter .14s;}
+  .run-btn:hover{filter:brightness(1.14);}
+  .run-btn:disabled{opacity:.4;cursor:not-allowed;}
+  .scope-body{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px 28px;}
+  .plate-wrap{position:relative;}
+  .plate-frame{position:relative;padding:22px;border:1px solid var(--hair);border-radius:14px;background:linear-gradient(180deg,#0b121d,#080d16);box-shadow:inset 0 0 60px rgba(0,0,0,.6),0 30px 60px -30px rgba(0,0,0,.8);}
+  .plate-frame::before,.plate-frame::after{content:"";position:absolute;width:13px;height:13px;border:1px solid var(--ink-4);opacity:.5;}
+  .plate-frame::before{left:8px;top:8px;border-right:0;border-bottom:0;}
+  .plate-frame::after{right:8px;bottom:8px;border-left:0;border-top:0;}
+  .plate-inner{display:flex;align-items:flex-start;gap:11px;}
+  .time-gutter{display:flex;flex-direction:column;gap:var(--cell-gap);padding-top:0;}
+  .time-gutter .tg{height:var(--cell-size);min-width:30px;display:flex;align-items:center;justify-content:flex-end;font-family:var(--mono);font-size:9px;letter-spacing:.03em;color:var(--ink-4);white-space:nowrap;transition:color .2s ease;}
+  .plate-inner:hover .time-gutter .tg{color:var(--ink-3);}
+  .plate{display:grid;grid-template-columns:repeat(20,1fr);gap:var(--cell-gap);position:relative;}
+  .cell{width:var(--cell-size);height:var(--cell-size);border-radius:5px;padding:0;border:1px solid var(--hair-soft);background:var(--cell);cursor:pointer;position:relative;transition:background .3s ease,box-shadow .3s ease,border-color .3s ease,transform .12s ease,opacity .3s ease;}
+  .cell:hover{transform:translateY(-2px);}
+  .cell:focus-visible{outline:2px solid #fff;outline-offset:2px;}
+  .plate.lens-active .cell:not(.lit){background:var(--cell-dark);border-color:transparent;opacity:.5;}
+  .cell.lit{background:color-mix(in srgb,var(--c) 22%,#0a1018);border-color:color-mix(in srgb,var(--c) 55%,transparent);box-shadow:0 0 7px color-mix(in srgb,var(--c) 55%,transparent),0 0 16px color-mix(in srgb,var(--c) 28%,transparent),inset 0 0 6px color-mix(in srgb,var(--c) 30%,transparent);opacity:1;animation:pulse 2.6s ease-in-out infinite;animation-delay:var(--d,0ms);}
+  .cell.focus{transform:translateY(-2px) scale(1.12);box-shadow:0 0 12px var(--c),0 0 26px color-mix(in srgb,var(--c) 60%,transparent);z-index:3;}
+  .cell.tint{background:color-mix(in srgb,var(--c) 16%,#0b1019);border-color:color-mix(in srgb,var(--c) 30%,transparent);opacity:1;}
+  .cell.archived{background:#070b11;border-color:#0e1622;opacity:.32;cursor:default;box-shadow:none;animation:none;}
+  .cell.archived:hover{transform:none;}
+  .cell.void{background:#080d15;border-color:#0d1521;opacity:.4;box-shadow:none;animation:none;pointer-events:none;}
+  .sweep{position:absolute;left:-4px;right:-4px;height:64px;pointer-events:none;border-radius:8px;background:linear-gradient(180deg,transparent,color-mix(in srgb,var(--c,#37d3c9) 18%,transparent) 45%,color-mix(in srgb,var(--c,#37d3c9) 42%,transparent) 50%,color-mix(in srgb,var(--c,#37d3c9) 18%,transparent) 55%,transparent);top:-70px;opacity:0;mix-blend-mode:screen;}
+  .sweep.run{animation:sweep .72s cubic-bezier(.4,0,.2,1) forwards;}
+  .legend{display:flex;flex-wrap:wrap;gap:7px 16px;justify-content:center;margin-top:22px;max-width:560px;}
+  .leg{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);letter-spacing:.02em;cursor:pointer;}
+  .leg .d{width:8px;height:8px;border-radius:50%;background:var(--lc);box-shadow:0 0 6px var(--lc);}
+  .leg:hover{color:var(--ink);}
+  .readout{margin-top:18px;font-family:var(--mono);font-size:11px;color:var(--ink-3);letter-spacing:.03em;display:flex;align-items:center;gap:9px;min-height:18px;text-align:center;}
+  .readout .blip{width:6px;height:6px;border-radius:50%;background:var(--c-aguardando);box-shadow:0 0 8px var(--c-aguardando);animation:beat 1.4s infinite;flex-shrink:0;}
+  .ev-head{padding:20px 20px 14px;border-bottom:1px solid var(--hair-soft);}
+  .ev-eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-4);}
+  .ev-title{font-family:var(--display);font-weight:600;font-size:16px;margin-top:9px;display:flex;align-items:center;gap:9px;}
+  .ev-title .tdot{width:9px;height:9px;border-radius:50%;background:var(--lc,var(--ink-4));box-shadow:0 0 9px var(--lc);}
+  .ev-summary{margin-top:12px;font-family:var(--mono);font-size:11.5px;line-height:1.6;color:var(--ink-2);background:#0a111d;border:1px solid var(--hair-soft);border-left:2px solid var(--lc,var(--ink-4));border-radius:8px;padding:11px 12px;}
+  .ev-summary b{color:var(--ink);font-weight:600;}
+  .batch{display:flex;align-items:center;gap:7px;padding:12px 18px;border-bottom:1px solid var(--hair-soft);flex-wrap:wrap;}
+  .chk{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);cursor:pointer;letter-spacing:.04em;text-transform:uppercase;margin-right:auto;}
+  .chk input{appearance:none;width:14px;height:14px;border:1px solid var(--ink-4);border-radius:3px;cursor:pointer;position:relative;background:#0a111d;}
+  .chk input:checked{background:var(--lc,var(--c-rascunho));border-color:var(--lc,var(--c-rascunho));}
+  .chk input:checked::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid #06101c;border-width:0 2px 2px 0;transform:rotate(45deg);}
+  .bbtn{font-family:var(--body);font-size:11.5px;font-weight:500;cursor:pointer;padding:6px 11px;border-radius:7px;border:1px solid var(--hair);background:#0e1726;color:var(--ink-2);display:inline-flex;align-items:center;gap:6px;transition:.14s;}
+  .bbtn:hover:not(:disabled){background:#13203a;color:var(--ink);border-color:#23344c;}
+  .bbtn:disabled{opacity:.4;cursor:not-allowed;}
+  .bbtn svg{width:13px;height:13px;}
+  .bbtn:focus-visible{outline:2px solid var(--c-rascunho);outline-offset:2px;}
+  .ev-list{flex:1;overflow-y:auto;padding:8px 12px 24px;}
+  .card{display:grid;grid-template-columns:16px 1fr;gap:11px;align-items:start;padding:12px 12px;border-radius:10px;border:1px solid transparent;cursor:default;transition:background .14s ease,border-color .14s ease;}
+  .card+.card{margin-top:2px;}
+  .card:hover{background:#0e1726;border-color:var(--hair-soft);}
+  .card.sel{background:color-mix(in srgb,var(--lc) 9%,#0c1422);border-color:color-mix(in srgb,var(--lc) 35%,transparent);}
+  .card .left-rail{display:flex;flex-direction:column;align-items:center;gap:8px;padding-top:3px;}
+  .card .cdot{width:9px;height:9px;border-radius:50%;background:var(--lc);box-shadow:0 0 8px var(--lc);flex:none;}
+  .card .cbox{appearance:none;width:13px;height:13px;border:1px solid var(--ink-4);border-radius:3px;background:#0a111d;cursor:pointer;position:relative;flex:none;}
+  .card .cbox:checked{background:var(--lc);border-color:var(--lc);}
+  .card .cbox:checked::after{content:"";position:absolute;left:3.5px;top:1px;width:4px;height:7px;border:solid #06101c;border-width:0 2px 2px 0;transform:rotate(45deg);}
+  .card .body{min-width:0;}
+  .card .row1{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}
+  .card .sender{font-weight:600;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .card .time{font-family:var(--mono);font-size:10px;color:var(--ink-4);flex:none;}
+  .card .subject{font-size:12.5px;color:var(--ink-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .card .reason{font-family:var(--mono);font-size:10px;color:var(--ink-3);margin-top:7px;display:flex;align-items:center;gap:6px;line-height:1.4;}
+  .card .reason::before{content:"";width:14px;height:1px;background:var(--lc);flex:none;opacity:.7;}
+  .acts{display:flex;gap:4px;margin-top:9px;}
+  .act{width:28px;height:28px;border-radius:7px;border:1px solid var(--hair-soft);background:#0c1422;color:var(--ink-3);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:.13s;}
+  .act:hover{color:var(--ink);background:#13203a;border-color:#26384f;}
+  .act svg{width:14px;height:14px;}
+  .act:focus-visible{outline:2px solid var(--c-rascunho);outline-offset:1px;}
+  .act.flagged{color:var(--c-urgente);border-color:color-mix(in srgb,var(--c-urgente) 45%,transparent);background:color-mix(in srgb,var(--c-urgente) 12%,#0c1422);}
+  .empty{padding:60px 26px;text-align:center;color:var(--ink-3);}
+  .empty .big{font-family:var(--display);font-size:15px;color:var(--ink-2);font-weight:600;}
+  .empty p{font-family:var(--mono);font-size:11px;line-height:1.7;margin-top:10px;color:var(--ink-4);}
+  .ov-eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-4);padding:10px 12px 4px;}
+  .card .lchip{display:inline-flex;align-items:center;font-family:var(--body);font-weight:500;font-size:9.5px;color:var(--ink);background:color-mix(in srgb,var(--lc) 20%,#0c1422);border:1px solid color-mix(in srgb,var(--lc) 40%,transparent);border-radius:5px;padding:1px 6px;margin-right:2px;}
+  .ov-grid{padding:6px 12px 24px;}
+  .ov-row{display:grid;grid-template-columns:11px 1fr auto;align-items:center;gap:11px;padding:13px 12px;border-radius:10px;cursor:pointer;border:1px solid transparent;transition:.14s;}
+  .ov-row:hover{background:#0e1726;border-color:var(--hair-soft);}
+  .ov-row .od{width:10px;height:10px;border-radius:50%;background:var(--lc);box-shadow:0 0 9px var(--lc);}
+  .ov-row .on{font-weight:500;font-size:13px;color:var(--ink);}
+  .ov-row .on small{display:block;font-family:var(--mono);font-size:10px;color:var(--ink-4);margin-top:3px;font-weight:400;}
+  .ov-row .oc{font-family:var(--mono);font-size:15px;font-weight:600;color:var(--ink);}
+  .drawer{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(180deg,#0d1726,#0a111d);border-top:1px solid var(--c-rascunho);border-radius:14px 14px 0 0;box-shadow:0 -20px 50px -20px rgba(0,0,0,.9);padding:16px 18px 18px;transform:translateY(110%);transition:transform .32s cubic-bezier(.4,0,.2,1);z-index:10;}
+  .drawer.open{transform:translateY(0);}
+  .drawer .dh{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .drawer .dtag{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--c-rascunho);display:flex;align-items:center;gap:7px;}
+  .drawer .dtag .b{width:6px;height:6px;border-radius:50%;background:var(--c-rascunho);box-shadow:0 0 8px var(--c-rascunho);animation:beat 1.3s infinite;}
+  .drawer .dx{background:transparent;border:0;color:var(--ink-4);cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;border-radius:6px;}
+  .drawer .dx:hover{color:var(--ink);background:#16223a;}
+  .drawer .dsub{font-weight:600;font-size:13.5px;margin-top:11px;color:var(--ink);}
+  .drawer textarea{width:100%;margin-top:10px;background:#070d16;border:1px solid var(--hair);border-radius:9px;color:var(--ink);font-family:var(--body);font-size:12.5px;line-height:1.65;padding:12px;resize:none;height:118px;}
+  .drawer textarea:focus{outline:none;border-color:var(--c-rascunho);}
+  .drawer .dactions{display:flex;gap:8px;margin-top:12px;}
+  .drawer .send{background:var(--c-rascunho);color:#06101c;border:0;font-weight:600;font-size:12.5px;padding:9px 16px;border-radius:8px;cursor:pointer;font-family:var(--body);}
+  .drawer .send:hover{filter:brightness(1.08);}
+  .drawer .send:disabled{opacity:.5;cursor:not-allowed;}
+  .drawer .ghost{background:transparent;border:1px solid var(--hair);color:var(--ink-2);font-size:12.5px;padding:9px 14px;border-radius:8px;cursor:pointer;font-family:var(--body);}
+  .drawer .ghost:hover{background:#13203a;color:var(--ink);}
+  .modal-bg{position:fixed;inset:0;background:rgba(4,8,16,.72);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:100;opacity:0;pointer-events:none;transition:opacity .2s ease;}
+  .modal-bg.open{opacity:1;pointer-events:all;}
+  .modal{background:linear-gradient(160deg,#0f1c30,#0a1220);border:1px solid var(--hair);border-radius:14px;padding:26px 24px 20px;width:360px;max-width:calc(100vw - 32px);box-shadow:0 32px 64px -20px rgba(0,0,0,.9);transform:translateY(10px) scale(.97);transition:transform .2s ease;}
+  .modal-bg.open .modal{transform:translateY(0) scale(1);}
+  .modal .m-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--m-color,var(--c-aguardando)) 14%,transparent);border:1px solid color-mix(in srgb,var(--m-color,var(--c-aguardando)) 30%,transparent);margin-bottom:14px;}
+  .modal .m-icon svg{width:18px;height:18px;color:var(--m-color,var(--c-aguardando));}
+  .modal .m-title{font-family:var(--display);font-weight:600;font-size:15px;color:var(--ink);margin-bottom:6px;}
+  .modal .m-desc{font-family:var(--body);font-size:13px;color:var(--ink-2);line-height:1.6;}
+  .modal .m-desc b{color:var(--ink);}
+  .modal .m-actions{display:flex;gap:8px;margin-top:20px;justify-content:flex-end;}
+  .modal .m-cancel{font-family:var(--body);font-size:13px;font-weight:500;cursor:pointer;padding:8px 14px;border-radius:8px;border:1px solid var(--hair);background:transparent;color:var(--ink-3);}
+  .modal .m-cancel:hover{color:var(--ink);background:#0e1726;}
+  .modal .m-confirm{font-family:var(--body);font-size:13px;font-weight:600;cursor:pointer;padding:8px 16px;border-radius:8px;border:0;background:var(--m-color,var(--c-aguardando));color:#050d18;}
+  .modal .m-confirm:hover{filter:brightness(1.1);}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:#0f1c30;border:1px solid var(--hair);border-radius:10px;padding:11px 16px;font-family:var(--mono);font-size:11.5px;color:var(--ink);opacity:0;pointer-events:none;transition:.26s;box-shadow:0 18px 40px -16px rgba(0,0,0,.8);display:flex;align-items:center;gap:9px;z-index:50;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  .toast .td{width:7px;height:7px;border-radius:50%;background:var(--c-aguardando);box-shadow:0 0 8px var(--c-aguardando);}
+  ::-webkit-scrollbar{width:9px;}
+  ::-webkit-scrollbar-thumb{background:#1a2740;border-radius:8px;border:2px solid transparent;background-clip:content-box;}
+  ::-webkit-scrollbar-thumb:hover{background:#243650;background-clip:content-box;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  @keyframes pulse{0%,100%{filter:brightness(.82);}50%{filter:brightness(1.25);}}
+  @keyframes beat{0%,100%{opacity:.55;}50%{opacity:1;}}
+  @keyframes sweep{0%{top:-70px;opacity:0;}10%{opacity:1;}90%{opacity:1;}100%{top:calc(100% + 6px);opacity:0;}}
+  @media (prefers-reduced-motion:reduce){.cell.lit,.mark .dot,.readout .blip,.drawer .dtag .b,.toast .td{animation:none !important;}.sweep.run{animation:none !important;opacity:0 !important;}*{transition-duration:.01ms !important;}}
+  @media (max-width:1180px){.app{grid-template-columns:210px minmax(0,1fr) 340px;}:root{--cell-size:22px;}}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- LEFT -->
+  <aside class="col left">
+    <div class="brand">
+      <div class="mark"><span class="dot"></span><span class="name">MailFlow</span></div>
+      <div class="sub">raio-x da caixa · <b id="scanInfo">pronto</b><br>
+        <button class="run-lnk" id="runBtn">varrer agora</button>
+      </div>
+    </div>
+    <div class="modebar">
+      <button class="modebtn on" data-mode="triagem">Triagem</button>
+      <button class="modebtn" data-mode="investigacoes">Investigações</button>
+    </div>
+    <nav class="lenses">
+      <div class="lgroup" id="triageGroup">
+        <div class="eyebrow">Lentes do diagnóstico</div>
+      </div>
+      <div class="lgroup" id="investGroup" hidden>
+        <div class="eyebrow">Agentes investigadores</div>
+      </div>
+    </nav>
+    <div class="foot" id="leftFoot">leitura local · nada sai sem seu ok</div>
+  </aside>
+
+  <!-- CENTER -->
+  <main class="col center">
+    <div class="scope-head">
+      <div class="scope-title"><small>Radiografia da caixa</small><span id="scopeTitle">Visão geral</span></div>
+      <div class="scope-stats">
+        <div class="stat"><div class="v" id="statTotal">—</div><div class="l">mensagens</div></div>
+        <div class="stat"><div class="v" id="statSignal">—</div><div class="l">com sinal</div></div>
+        <div class="stat"><div class="v live">ativo</div><div class="l">agente</div></div>
+      </div>
+    </div>
+    <div class="scope-body">
+      <div class="plate-wrap">
+        <div class="plate-frame">
+          <div class="plate-inner">
+            <div class="time-gutter" id="timeGutter"></div>
+            <div class="plate" id="plate"></div>
+          </div>
+          <div class="sweep" id="sweep"></div>
+        </div>
+      </div>
+      <div class="readout"><span class="blip"></span><span id="readout">clique em <b>varrer agora</b> para o agente radiografar sua caixa.</span></div>
+    </div>
+  </main>
+
+  <!-- RIGHT -->
+  <aside class="col right" style="position:relative;">
+    <div class="ev-head">
+      <div class="ev-eyebrow">Evidências</div>
+      <div class="ev-title"><span class="tdot" id="evDot" style="--lc:var(--ink-4)"></span><span id="evTitle">Nada selecionado</span></div>
+      <div class="ev-summary" id="evSummary" style="--lc:var(--ink-4)">Escolha uma lente para o agente abrir as mensagens correspondentes.</div>
+    </div>
+    <div class="batch" id="batchBar" style="display:none">
+      <label class="chk"><input type="checkbox" id="selAll"> selecionar tudo</label>
+      <button class="bbtn" id="batchDraft" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        Criar rascunhos
+      </button>
+      <button class="bbtn" id="batchArchive" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/></svg>
+        Arquivar
+      </button>
+    </div>
+    <div class="ev-list" id="evList">
+      <div class="empty"><div class="big">Aguardando varredura</div><p>clique em varrer agora<br>para o agente analisar sua caixa.</p></div>
+    </div>
+    <div class="drawer" id="drawer">
+      <div class="dh">
+        <span class="dtag"><span class="b"></span>rascunho do agente</span>
+        <button class="dx" id="drawerClose" aria-label="Fechar">×</button>
+      </div>
+      <div class="dsub" id="draftSubject"></div>
+      <textarea id="draftBody" spellcheck="false"></textarea>
+      <div class="dactions">
+        <button class="send" id="draftSend">Enviar resposta</button>
+        <button class="ghost" id="draftSave">Salvar rascunho</button>
+        <button class="ghost" id="draftDiscard">Descartar</button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal" id="modal">
+    <div class="m-icon" id="mIcon"><svg id="mIconSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"></svg></div>
+    <div class="m-title" id="mTitle"></div>
+    <div class="m-desc" id="mDesc"></div>
+    <div class="m-actions">
+      <button class="m-cancel" id="mCancel">Cancelar</button>
+      <button class="m-confirm" id="mConfirm">Confirmar</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"><span class="td"></span><span id="toastMsg"></span></div>
+
+<script>
+/* ── constants ── */
+const DAYS = 10, COLS = 20;
+
+/* ── lenses ── */
+const LENSES = [
+  {key:'responder',  name:'Precisam de resposta', color:'--c-responder',
+    summary:(n)=>`Encontrei <b>${n}</b> mensagens que esperam uma resposta sua.`},
+  {key:'urgente',    name:'Urgentes',             color:'--c-urgente',
+    summary:(n)=>`<b>${n}</b> mensagens com sinal crítico — prazo curto ou remetente prioritário.`},
+  {key:'aguardando', name:'Aguardando retorno',   color:'--c-aguardando',
+    summary:(n)=>`Em <b>${n}</b> conversas a bola está com a outra parte.`},
+  {key:'rascunho',   name:'Rascunhos prontos',    color:'--c-rascunho',
+    summary:(n)=>`Já escrevi <b>${n}</b> respostas. Revise e envie em um clique.`},
+  {key:'arquivar',   name:'Podem ser arquivados', color:'--c-arquivar',
+    summary:(n)=>`<b>${n}</b> mensagens sem ação necessária. Seguras para arquivar.`},
+  {key:'ruido',      name:'Ruído',                color:'--c-ruido',
+    summary:(n)=>`<b>${n}</b> newsletters e notificações automáticas.`},
+];
+const LENS_BY_KEY = Object.fromEntries(LENSES.map(l=>[l.key,l]));
+
+/* ── state ── */
+const EMAILS = new Array(DAYS * COLS).fill(null).map((_,i)=>({
+  id:i,idx:i,row:Math.floor(i/COLS),col:i%COLS,void:true,archived:false,flagged:false
+}));
+const cells = [];
+let activeLens = null, activeInv = null, mode = 'triagem';
+const selected = new Set();
+let currentDraftEmail = null, currentDraftAction = null;
+
+/* ── helpers ── */
+function fromName(s){
+  if(!s) return "";
+  const m = s.match(/^"?([^"<]+)"?\s*</);
+  return (m ? m[1] : s.replace(/<[^>]+>/g,"")).replace(/"/g,"").trim();
+}
+function parseDate(d){
+  if(!d) return null;
+  const n=Number(d);
+  if(!isNaN(n)&&n>1e12) return new Date(n);
+  const p=new Date(d);
+  return isNaN(p.getTime())?null:p;
+}
+function dateToRow(date){
+  const p=parseDate(date); if(!p) return DAYS-1;
+  const today=new Date(); today.setHours(12,0,0,0);
+  const diff=Math.round((today.getTime()-p.getTime())/86400000);
+  return Math.max(0,Math.min(DAYS-1,diff));
+}
+function timeLabel(r){ return r===0?"hoje":r===1?"ontem":`há ${r}d`; }
+function reasonFor(item){
+  if(item.kind==="urgent") return item.description||"não lido, aguarda sua resposta";
+  if(item.kind==="followup"){
+    const p=parseDate(item.date);
+    if(p){const d=Math.round((Date.now()-p.getTime())/86400000); return `${d} dias sem retorno`;}
+    return "follow-up pendente";
+  }
+  if(item.kind==="draft") return "rascunho pronto — revise e envie";
+  return "email sem ação urgente";
+}
+function dayLabelByOffset(r){
+  const d=new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate()-r);
+  if(r===0) return "hoje"; if(r===1) return "ontem";
+  return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0");
+}
+const lensCount = key => EMAILS.filter(e=>!e.void&&!e.archived&&e.key===key).length;
+const realActive = e => !e.void && !e.archived;
+/* ── agent confirm modal ── */
+const ICONS={
+  archive:'<path d="M3 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4z"/><path d="M5 7v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V7"/><path d="M10 11h4"/>',
+  send:'<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+  draft:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+};
+function agentConfirm({title,desc,confirmLabel='Confirmar',color,icon='archive'},onConfirm){
+  const bg=document.getElementById("modalBg");
+  const m=document.getElementById("modal");
+  document.getElementById("mTitle").textContent=title;
+  document.getElementById("mDesc").innerHTML=desc;
+  document.getElementById("mConfirm").textContent=confirmLabel;
+  document.getElementById("mIconSvg").innerHTML=ICONS[icon]||ICONS.archive;
+  m.style.setProperty("--m-color",color||"var(--c-aguardando)");
+  bg.classList.add("open");
+  const close=()=>bg.classList.remove("open");
+  const confirmBtn=document.getElementById("mConfirm");
+  const cancelBtn=document.getElementById("mCancel");
+  const newConfirm=confirmBtn.cloneNode(true); confirmBtn.replaceWith(newConfirm);
+  const newCancel=cancelBtn.cloneNode(true); cancelBtn.replaceWith(newCancel);
+  document.getElementById("mConfirm").addEventListener("click",()=>{close();onConfirm();},{once:true});
+  document.getElementById("mCancel").addEventListener("click",close,{once:true});
+  bg.addEventListener("click",e=>{if(e.target===bg) close();},{once:true});
+}
+let toastTimer;
+function toast(msg){
+  const t=document.getElementById("toast");
+  document.getElementById("toastMsg").textContent=msg;
+  t.classList.add("show"); clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>t.classList.remove("show"),2400);
+}
+async function api(url,opts={}){
+  const res=await fetch(url,{headers:{"content-type":"application/json"},...opts});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
+  return data;
+}
+
+/* ── build plate (void initially) ── */
+const plate = document.getElementById("plate");
+EMAILS.forEach(em=>{
+  const c=document.createElement("button");
+  c.dataset.id=em.id; c.className="cell void"; c.tabIndex=-1;
+  c.setAttribute("aria-hidden","true");
+  plate.appendChild(c); cells[em.id]=c;
+});
+
+/* ── gutter ── */
+const gutter=document.getElementById("timeGutter");
+for(let r=0;r<DAYS;r++){
+  const el=document.createElement("div"); el.className="tg";
+  el.textContent=dayLabelByOffset(r); gutter.appendChild(el);
+}
+
+/* ── build lens list ── */
+const triageGroup=document.getElementById("triageGroup");
+LENSES.forEach(l=>{
+  const b=document.createElement("button");
+  b.className="lens"; b.dataset.key=l.key;
+  b.style.setProperty("--lc","var("+l.color+")");
+  b.setAttribute("aria-pressed","false");
+  b.innerHTML=`<span class="lns-dot"></span>
+    <span class="lns-name">${l.name}</span>
+    <span class="lns-count" data-count="${l.key}">—</span>
+    <span class="bar"><i style="--w:0%"></i></span>`;
+  b.addEventListener("click",()=>setLens(activeLens===l.key?null:l.key));
+  triageGroup.appendChild(b);
+});
+
+/* ── update cell dom ── */
+function updateCell(i){
+  const em=EMAILS[i]; const c=cells[i]; if(!c) return;
+  if(em.void){
+    c.className="cell void"; c.tabIndex=-1; c.setAttribute("aria-hidden","true");
+    c.onclick=null; c.onmouseenter=null; c.onmouseleave=null; return;
+  }
+  c.className="cell"; c.tabIndex=0; c.removeAttribute("aria-hidden");
+  c.style.setProperty("--c","var("+LENS_BY_KEY[em.key].color+")");
+  c.style.setProperty("--d",(em.row*55)+"ms");
+  c.setAttribute("aria-label",em.sender+": "+em.subject+" ("+em.time+")");
+  c.onmouseenter=()=>crossHighlight(em.id,true);
+  c.onmouseleave=()=>crossHighlight(em.id,false);
+  c.onclick=()=>{
+    if(em.archived) return;
+    if(mode==="investigacoes"){
+      const f=document.querySelector('.finding[data-id="'+em.id+'"]');
+      if(f){f.scrollIntoView({block:"center",behavior:"smooth"});f.classList.add("hot");setTimeout(()=>f.classList.remove("hot"),700);}
+      return;
+    }
+    if(!activeLens){setLens(em.key); return;}
+    const card=document.querySelector('.card[data-id="'+em.id+'"]');
+    if(card){card.scrollIntoView({block:"center",behavior:"smooth"});flashCard(card);}
+  };
+}
+function flashCard(card){
+  const o=card.style.background;
+  card.style.background="color-mix(in srgb,var(--lc) 22%,#0c1422)";
+  setTimeout(()=>{card.style.background=o;},450);
+}
+
+/* ── process feed items into EMAILS ── */
+function processItems(items){
+  // reset
+  for(let i=0;i<DAYS*COLS;i++){
+    EMAILS[i]={id:i,idx:i,row:Math.floor(i/COLS),col:i%COLS,void:true,archived:false,flagged:false};
+  }
+  const buckets={}; for(let r=0;r<DAYS;r++) buckets[r]=[];
+
+  items.forEach(item=>{
+    if(item.kind==="health") return;
+    const toAdd=[];
+    if(item.kind==="noise"){
+      const samples=item.samples||[], ids=item.emailIds||[];
+      ids.forEach((eid,i)=>{
+        const s=samples[i];
+        toAdd.push({key:"ruido",sender:fromName(s?.from||"")||"Newsletter",
+          subject:s?.subject||"Email de ruído",reason:"newsletter ou notificação automática",
+          emailId:eid,emailIds:ids,date:s?.date||item.date||null,draftText:null});
+      });
+    } else {
+      const keyMap={urgent:"urgente",followup:"aguardando",draft:"rascunho",others:"arquivar"};
+      toAdd.push({key:keyMap[item.kind]||"arquivar",
+        sender:fromName(item.from||"")||"Remetente",
+        subject:item.title||"(sem assunto)",
+        reason:reasonFor(item),
+        emailId:item.emailId,date:item.date||null,draftText:item.draftText||null});
+    }
+    toAdd.forEach(em=>{
+      const r=dateToRow(em.date);
+      if(buckets[r]&&buckets[r].length<COLS) buckets[r].push(em);
+    });
+  });
+
+  // reclassify: top urgent → urgente, rest → responder
+  let urgCount=0;
+  for(let r=0;r<DAYS;r++){
+    buckets[r].forEach((em,col)=>{
+      const idx=r*COLS+col;
+      let key=em.key;
+      if(key==="urgente"){ key = urgCount<3?"urgente":"responder"; urgCount++; }
+      EMAILS[idx]={id:idx,idx,row:r,col,key,
+        sender:em.sender,subject:em.subject,reason:em.reason,
+        emailId:em.emailId,emailIds:em.emailIds,draftText:em.draftText,
+        hoursAgo:r*24,time:timeLabel(r),archived:false,flagged:false,void:false};
+    });
+  }
+}
+
+/* ── overview ── */
+function renderOverview(){
+  plate.classList.remove("lens-active");
+  EMAILS.forEach(em=>{
+    const c=cells[em.id]; if(em.void) return;
+    c.classList.remove("lit","focus","tint");
+    c.style.setProperty("--c","var("+LENS_BY_KEY[em.key].color+")");
+    if(em.archived){c.classList.add("archived");return;}
+    c.classList.add("tint");
+  });
+}
+
+/* ── set lens ── */
+function setLens(key){
+  activeLens=key; selected.clear();
+  document.querySelectorAll(".lens").forEach(b=>b.setAttribute("aria-pressed",b.dataset.key===key?"true":"false"));
+  if(!key){
+    document.getElementById("scopeTitle").textContent="Visão geral";
+    renderOverview(); renderOverviewEvidence();
+    document.getElementById("readout").textContent="cada pixel é uma mensagem · escolha uma lente para acender as evidências.";
+    closeDrawer(); return;
+  }
+  const lens=LENS_BY_KEY[key];
+  document.getElementById("scopeTitle").textContent=lens.name;
+  const sweep=document.getElementById("sweep");
+  sweep.style.setProperty("--c","var("+lens.color+")");
+  sweep.classList.remove("run"); void sweep.offsetWidth; sweep.classList.add("run");
+  plate.classList.add("lens-active");
+  const matches=EMAILS.filter(e=>e.key===key&&!e.archived);
+  EMAILS.forEach(em=>{
+    const c=cells[em.id]; if(em.void) return;
+    c.classList.remove("lit","focus","tint");
+    c.style.setProperty("--c","var("+LENS_BY_KEY[em.key].color+")");
+    if(em.archived){c.classList.add("archived");return;}
+    if(em.key===key) c.classList.add("lit");
+  });
+  document.getElementById("readout").textContent=
+    `varredura concluída · ${matches.length} pixels acesos · ${lens.name.toLowerCase()}`;
+  renderEvidence(key); closeDrawer();
+}
+
+/* ── cross highlight ── */
+function crossHighlight(id,on){
+  const em=EMAILS[id]; if(!em||em.void||em.archived) return;
+  cells[id].classList.toggle("focus",on);
+  const card=document.querySelector('.card[data-id="'+id+'"]');
+  if(card) card.style.borderColor=on?"color-mix(in srgb,var(--lc) 55%,transparent)":"";
+  const find=document.querySelector('.finding[data-id="'+id+'"]');
+  if(find) find.classList.toggle("hot",on);
+}
+
+/* ── evidence: lens ── */
+const evList=document.getElementById("evList");
+const batchBar=document.getElementById("batchBar");
+
+function renderEvidence(key){
+  const lens=LENS_BY_KEY[key];
+  const list=EMAILS.filter(e=>e.key===key&&!e.archived);
+  document.getElementById("evDot").style.setProperty("--lc","var("+lens.color+")");
+  document.getElementById("evTitle").textContent=`${lens.name} · ${list.length}`;
+  const sum=document.getElementById("evSummary");
+  sum.style.setProperty("--lc","var("+lens.color+")"); sum.innerHTML=lens.summary(list.length);
+  batchBar.style.display="flex"; batchBar.style.setProperty("--lc","var("+lens.color+")");
+  document.getElementById("selAll").checked=false; updateBatchButtons();
+  evList.innerHTML="";
+  if(!list.length){evList.innerHTML=`<div class="empty"><div class="big">Lente vazia</div><p>nenhuma mensagem aqui agora.</p></div>`;return;}
+  list.forEach(em=>evList.appendChild(buildCard(em,lens)));
+}
+
+function buildCard(em,lens,overview){
+  const card=document.createElement("div");
+  card.className="card"; card.dataset.id=em.id;
+  card.style.setProperty("--lc","var("+lens.color+")");
+  const canDraft=em.key==="responder"||em.key==="urgente"||em.key==="rascunho"||em.key==="aguardando";
+  const rail=overview?"":'<input type="checkbox" class="cbox" aria-label="Selecionar">';
+  const chip=overview?`<span class="lchip">${lens.name}</span>`:"";
+  card.innerHTML=`
+    <div class="left-rail">${rail}<span class="cdot"></span></div>
+    <div class="body">
+      <div class="row1"><span class="sender">${h(em.sender)}</span><span class="time">${em.time}</span></div>
+      <div class="subject">${h(em.subject)}</div>
+      <div class="reason">${chip}${h(em.reason)}</div>
+      <div class="acts">
+        ${canDraft?`<button class="act" data-act="draft" title="Rascunho"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+        <button class="act" data-act="reply" title="Responder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg></button>`:""}
+        <button class="act${em.flagged?" flagged":""}" data-act="flag" title="Alertar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></button>
+        <button class="act" data-act="archive" title="Arquivar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/></svg></button>
+      </div>
+    </div>`;
+  card.addEventListener("mouseenter",()=>{const c=cells[em.id];if(c)c.classList.add("focus");});
+  card.addEventListener("mouseleave",()=>{const c=cells[em.id];if(c)c.classList.remove("focus");});
+  const box=card.querySelector(".cbox");
+  if(box) box.addEventListener("change",()=>{
+    if(box.checked){selected.add(em.id);card.classList.add("sel");}
+    else{selected.delete(em.id);card.classList.remove("sel");}
+    syncSelAll(); updateBatchButtons();
+  });
+  card.querySelectorAll(".act").forEach(btn=>{
+    btn.addEventListener("click",e=>{
+      e.stopPropagation();
+      const a=btn.dataset.act;
+      if(a==="archive") agentConfirm({title:"Arquivar mensagem",desc:`Arquivar <b>${h(em.subject)}</b> de <b>${h(em.sender)}</b>?`,confirmLabel:"Arquivar",color:"var(--c-arquivar)",icon:"archive"},()=>doArchive(em.id));
+      else if(a==="flag"){em.flagged=!em.flagged;btn.classList.toggle("flagged",em.flagged);toast(em.flagged?"alerta marcado":"alerta removido");}
+      else if(a==="draft"||a==="reply") agentConfirm({title:"Gerar rascunho",desc:`O agente vai escrever uma resposta para <b>${h(em.sender)}</b>.<br><em style="color:var(--ink-3);font-size:12px">Você vai revisar antes de enviar.</em>`,confirmLabel:"Gerar rascunho",color:"var(--c-rascunho)",icon:"draft"},()=>openDraft(em));
+    });
+  });
+  return card;
+}
+function h(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+
+/* ── overview evidence ── */
+function renderOverviewEvidence(){
+  batchBar.style.display="none";
+  document.getElementById("evDot").style.setProperty("--lc","var(--c-aguardando)");
+  document.getElementById("evTitle").textContent="Resumo de agora";
+  const sum=document.getElementById("evSummary");
+  sum.style.setProperty("--lc","var(--c-aguardando)");
+  const live=EMAILS.filter(realActive).length;
+  const attn=EMAILS.filter(e=>realActive(e)&&["urgente","responder","aguardando","rascunho"].includes(e.key)).length;
+  sum.innerHTML=live
+    ? `Radiografiei <b>${live}</b> mensagens dos últimos 10 dias. <b>${attn}</b> pedem atenção sua.`
+    : `Clique em <b>varrer agora</b> para o agente analisar sua caixa.`;
+  const pri=EMAILS
+    .filter(e=>realActive(e)&&(e.key==="urgente"||e.key==="responder"))
+    .sort((a,b)=>a.hoursAgo-b.hoursAgo).slice(0,8);
+  evList.innerHTML="";
+  if(!pri.length){
+    if(live) evList.innerHTML=`<div class="empty"><div class="big">Sem urgências</div><p>nada crítico no momento.</p></div>`;
+    return;
+  }
+  const eb=document.createElement("div"); eb.className="ov-eyebrow";
+  eb.textContent=`Prioridades · ${pri.length}`; evList.appendChild(eb);
+  pri.forEach(em=>evList.appendChild(buildCard(em,LENS_BY_KEY[em.key],true)));
+}
+
+/* ── archive ── */
+async function doArchive(id,silent){
+  const em=EMAILS[id]; if(!em||em.void||em.archived) return;
+  em.archived=true; selected.delete(id);
+  cells[id].classList.remove("lit","tint","focus"); cells[id].classList.add("archived");
+  const card=document.querySelector('.card[data-id="'+id+'"]'); if(card) card.remove();
+  refreshCounts();
+  if(activeLens){
+    const left=lensCount(activeLens);
+    document.getElementById("evTitle").textContent=LENS_BY_KEY[activeLens].name+" · "+left;
+    document.getElementById("evSummary").innerHTML=LENS_BY_KEY[activeLens].summary(left);
+    if(!left) evList.innerHTML=`<div class="empty"><div class="big">Lente vazia</div><p>tudo tratado aqui.</p></div>`;
+  } else renderOverviewEvidence();
+  if(!silent) toast("mensagem arquivada");
+  const ids=em.emailIds||(em.emailId?[em.emailId]:[]);
+  if(ids.length) api("/api/inbox/actions/batch",{method:"POST",body:JSON.stringify({messageIds:ids,action:"archive"})}).catch(()=>{});
+}
+
+/* ── draft drawer ── */
+const drawer=document.getElementById("drawer");
+async function openDraft(em){
+  document.getElementById("draftSubject").textContent=em.subject.startsWith("Re:")?"Re: "+em.subject.slice(3).trim():"Re: "+em.subject;
+  currentDraftEmail=em; currentDraftAction=null;
+  if(em.draftText){
+    document.getElementById("draftBody").value=em.draftText;
+  } else {
+    document.getElementById("draftBody").value="Gerando rascunho...";
+    try{
+      const d=await api("/api/composer/prepare-reply",{method:"POST",body:JSON.stringify({messageId:em.emailId,instruction:"Responda de forma profissional e objetiva."})});
+      currentDraftAction=d.pendingAction||d.operation||null;
+      document.getElementById("draftBody").value=currentDraftAction?.previewText||"";
+    }catch(err){document.getElementById("draftBody").value="";toast("Erro ao gerar rascunho");}
+  }
+  drawer.classList.add("open");
+}
+function closeDrawer(){drawer.classList.remove("open");}
+document.getElementById("drawerClose").addEventListener("click",closeDrawer);
+document.getElementById("draftDiscard").addEventListener("click",()=>{closeDrawer();toast("rascunho descartado");});
+document.getElementById("draftSave").addEventListener("click",()=>{closeDrawer();toast("rascunho salvo");});
+document.getElementById("draftSend").addEventListener("click",()=>{
+  const subj=document.getElementById("draftSubject").textContent;
+  agentConfirm({title:"Enviar resposta",desc:`O agente vai enviar <b>${h(subj)}</b>.<br><em style="color:var(--ink-3);font-size:12px">Esta ação envia o email de verdade.</em>`,confirmLabel:"Enviar agora",color:"var(--c-aguardando)",icon:"send"},sendDraft);
+});
+async function sendDraft(){
+  const btn=document.getElementById("draftSend"); btn.disabled=true; btn.textContent="Enviando...";
+  try{
+    const text=document.getElementById("draftBody").value;
+    if(currentDraftAction?.id){
+      await api("/api/agent/actions/"+encodeURIComponent(currentDraftAction.id)+"/confirm",{method:"POST",body:JSON.stringify({editedContent:text})});
+    } else if(currentDraftEmail?.emailId){
+      const d=await api("/api/composer/prepare-reply",{method:"POST",body:JSON.stringify({messageId:currentDraftEmail.emailId,instruction:text})});
+      const aid=(d.pendingAction||d.operation)?.id;
+      if(aid) await api("/api/agent/actions/"+encodeURIComponent(aid)+"/confirm",{method:"POST",body:JSON.stringify({editedContent:text})});
+    }
+    closeDrawer(); toast("resposta enviada ✓");
+    if(currentDraftEmail) doArchive(currentDraftEmail.id,true);
+  }catch(e){toast("Erro ao enviar: "+e.message);}
+  finally{btn.disabled=false; btn.textContent="Enviar resposta";}
+}
+
+/* ── batch ── */
+document.getElementById("selAll").addEventListener("change",function(){
+  evList.querySelectorAll(".cbox").forEach(b=>{
+    const card=b.closest(".card"); const id=+card.dataset.id;
+    b.checked=this.checked;
+    if(this.checked){selected.add(id);card.classList.add("sel");}
+    else{selected.delete(id);card.classList.remove("sel");}
+  }); updateBatchButtons();
+});
+function syncSelAll(){
+  const boxes=[...evList.querySelectorAll(".cbox")];
+  document.getElementById("selAll").checked=boxes.length>0&&boxes.every(b=>b.checked);
+}
+function updateBatchButtons(){
+  const n=selected.size;
+  const bd=document.getElementById("batchDraft"),ba=document.getElementById("batchArchive");
+  bd.disabled=!n; ba.disabled=!n;
+  bd.lastChild.nodeValue=n?` Criar rascunhos (${n})`:" Criar rascunhos";
+  ba.lastChild.nodeValue=n?` Arquivar (${n})`:" Arquivar";
+}
+document.getElementById("batchArchive").addEventListener("click",()=>{
+  const ids=[...selected]; const n=ids.length;
+  agentConfirm({title:`Arquivar ${n} mensagem${n>1?"s":""}`,desc:`O agente vai arquivar <b>${n} mensagem${n>1?"s":""}</b> selecionada${n>1?"s":""}. Essa ação não pode ser desfeita por aqui.`,confirmLabel:`Arquivar ${n}`,color:"var(--c-arquivar)",icon:"archive"},()=>{
+    ids.forEach(id=>doArchive(id,true)); toast(`${n} mensagens arquivadas`);
+  });
+});
+document.getElementById("batchDraft").addEventListener("click",()=>{
+  const n=selected.size;
+  agentConfirm({title:`Criar ${n} rascunho${n>1?"s":""}`,desc:`O agente vai gerar respostas para <b>${n} mensagem${n>1?"s":""}</b>.<br><em style="color:var(--ink-3);font-size:12px">Você vai revisar cada uma antes de enviar.</em>`,confirmLabel:`Criar ${n} rascunho${n>1?"s":""}`,color:"var(--c-rascunho)",icon:"draft"},()=>{
+  toast(`${n} rascunhos gerados`);
+  selected.clear(); if(activeLens) renderEvidence(activeLens);
+  });
+});
+
+/* ── refresh counts ── */
+let maxBar=1;
+function refreshCounts(){
+  maxBar=Math.max(1,...LENSES.map(l=>lensCount(l.key)));
+  LENSES.forEach(l=>{
+    const n=lensCount(l.key);
+    const el=document.querySelector('.lns-count[data-count="'+l.key+'"]'); if(el) el.textContent=n||"—";
+    const bar=document.querySelector('.lens[data-key="'+l.key+'"] .bar i'); if(bar) bar.style.setProperty("--w",(n/maxBar*100)+"%");
+  });
+  const live=EMAILS.filter(realActive).length;
+  const signal=EMAILS.filter(e=>realActive(e)&&e.key!=="arquivar"&&e.key!=="ruido").length;
+  document.getElementById("statTotal").textContent=live||"—";
+  document.getElementById("statSignal").textContent=signal||"—";
+}
+
+/* ── load data ── */
+async function loadFeed(){
+  const btn=document.getElementById("runBtn"); btn.disabled=true; btn.textContent="varrendo...";
+  document.getElementById("readout").innerHTML='<span class="blip"></span><span>varrendo caixa...</span>';
+  document.getElementById("scanInfo").textContent="varrendo...";
+  try{
+    const data=await api("/api/executive/feed",{method:"POST",body:JSON.stringify({timeframe:"10d",maxEmails:200})});
+    processItems(data.feed?.items||[]);
+    EMAILS.forEach((_,i)=>updateCell(i));
+    refreshCounts(); renderOverview(); renderOverviewEvidence();
+    const live=EMAILS.filter(realActive).length;
+    document.getElementById("scanInfo").textContent=live+" mensagens varridas";
+    document.getElementById("readout").innerHTML='<span class="blip"></span><span>varredura concluída · escolha uma lente para acender as evidências.</span>';
+  }catch(err){
+    document.getElementById("readout").textContent="erro: "+err.message;
+    document.getElementById("scanInfo").textContent="erro";
+  }finally{btn.disabled=false; btn.textContent="varrer agora";}
+}
+document.getElementById("runBtn").addEventListener("click",loadFeed);
+
+/* ── investigations ── */
+const ICO={
+  detetive:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>',
+  gerente:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>',
+  cacador:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
+  organizador:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>',
+  promessas:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+  auditor:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>',
+  rede:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M10.5 6.8 6.5 16M13.5 6.8l4 9.2M7.5 18h9"/></svg>',
+  previsor:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a7 7 0 0 0-4 12.7V18a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 3Z"/><path d="M9 21h6"/></svg>'
+};
+const txtOf=e=>(e.sender+" "+e.subject).toLowerCase();
+const real=()=>EMAILS.filter(realActive);
+function bySender(list){const m={};list.forEach(e=>{if(!m[e.sender])m[e.sender]=[];m[e.sender].push(e);});return m;}
+const topN=(list,n)=>list.slice(0,n);
+
+const INVESTIGATIONS=[
+  {key:"detetive",name:"Detetive de Emails",tag:"o que está acontecendo",color:"#7aa2ff",icon:ICO.detetive,
+    select:()=>topN(real().filter(e=>["urgente","responder","aguardando"].includes(e.key)).sort((a,b)=>a.hoursAgo-b.hoursAgo),8),
+    report:(ev)=>({headline:`${ev.length} fios em movimento`,lead:"O que mudou na sua caixa nos últimos dias, em ordem de calor.",
+      findings:topN(ev,4).map(e=>({id:e.id,html:`<b>${h(e.sender)}</b> ${e.key==="aguardando"?"segue te devendo retorno":"está esperando você"} <em>(${e.time})</em>: "${h(e.subject)}".`})),
+      actions:[{l:"Abrir conversa",m:"abrindo o fio mais quente"},{l:"Marcar lidas",m:"marcadas como lidas",g:true}]})},
+  {key:"gerente",name:"Gerente de Vida",tag:"relatório semanal",color:"#6ed0a8",icon:ICO.gerente,
+    select:()=>topN(real().sort((a,b)=>a.hoursAgo-b.hoursAgo),9),
+    report:(ev)=>{
+      const live=real().length,resp=lensCount("responder")+lensCount("urgente"),arq=lensCount("arquivar")+lensCount("ruido");
+      return{headline:"Sua semana em uma olhada",lead:`${live} mensagens nos últimos 10 dias. ${resp} pedem você, ${arq} são ruído.`,
+        findings:[{html:`<b>${resp}</b> pediram resposta sua. <em>${arq} dá pra arquivar sem ler.</em>`},
+          {html:`Remetente mais ativo: <b>${h(Object.entries(bySender(real())).sort((a,b)=>b[1].length-a[1].length)[0]?.[0]||"—")}</b>.`},
+          {html:`Mensagens de rascunho prontas: <b>${lensCount("rascunho")}</b>. Revise e envie.`}],
+        actions:[{l:"Gerar relatório",m:"relatório da semana gerado"},{l:"Resumo toda segunda",m:"resumo semanal agendado",g:true}]};
+    }},
+  {key:"cacador",name:"Caçador de Oportunidades",tag:"vagas, bolsas, editais",color:"#ffd166",icon:ICO.cacador,
+    select:()=>{const kw=["vaga","bolsa","edital","webinar","evento","program","convite","tend","novidade","linkedin"];
+      let l=real().filter(e=>kw.some(k=>txtOf(e).includes(k)));if(l.length<4) l=l.concat(real().filter(e=>e.key==="ruido"));return topN([...new Set(l)],8);},
+    report:(ev)=>({headline:`${ev.length} portas que valem um olhar`,lead:"Convites e chamadas que passariam batido no meio do ruído.",
+      findings:topN(ev,4).map(e=>({id:e.id,html:`<b>${h(e.sender)}</b> <em>(${e.time})</em>: "${h(e.subject)}".`})),
+      actions:[{l:"Salvar oportunidades",m:"oportunidades salvas"},{l:"Pôr prazos na agenda",m:"prazos adicionados",g:true}]})},
+  {key:"organizador",name:"Organizador Automático",tag:"pastas e regras",color:"#9b8cff",icon:ICO.organizador,
+    select:()=>{const grp=bySender(real().filter(e=>e.key==="arquivar"||e.key==="ruido"));
+      return topN(Object.values(grp).filter(a=>a.length>=2).sort((a,b)=>b.length-a.length).flat(),10);},
+    report:(ev)=>{const rules=Object.entries(bySender(real().filter(e=>e.key==="arquivar"||e.key==="ruido"))).filter(([,a])=>a.length>=2).sort((a,b)=>b[1].length-a[1].length).slice(0,4);
+      return{headline:`${rules.length} regras prontas para criar`,lead:"Remetentes que se repetem e dá pra colocar no piloto automático.",
+        findings:rules.map(([s,a])=>({id:a[0].id,html:`Arquivar de <b>${h(s)}</b> automaticamente. <em>${a.length} esta semana.</em>`})),
+        actions:[{l:"Aplicar todas",m:"regras aplicadas"},{l:"Revisar uma a uma",m:"abrindo revisão",g:true}]};
+    }},
+  {key:"promessas",name:"Contador de Promessas",tag:"quem prometeu o quê",color:"#ff9e6d",icon:ICO.promessas,
+    select:()=>topN(real().filter(e=>e.key==="responder"||e.key==="urgente"||e.key==="aguardando").sort((a,b)=>b.hoursAgo-a.hoursAgo),9),
+    report:(ev)=>{
+      const voce=real().filter(e=>e.key==="responder"||e.key==="urgente"),eles=real().filter(e=>e.key==="aguardando");
+      const f=[];topN(voce,2).forEach(e=>f.push({id:e.id,html:`<b>Você</b> deve retorno a ${h(e.sender)} <em>(${e.time})</em>.`}));
+      topN(eles,2).forEach(e=>f.push({id:e.id,html:`<b>${h(e.sender)}</b> ficou de responder e sumiu <em>(${e.time})</em>.`}));
+      return{headline:`${voce.length+eles.length} promessas em aberto`,lead:`${voce.length} suas, ${eles.length} que prometeram a você.`,
+        findings:f,actions:[{l:"Cobrar quem te deve",m:"cobranças preparadas"},{l:"Preparar suas respostas",m:"rascunhos criados",g:true}]};
+    }},
+  {key:"auditor",name:"Auditor Financeiro",tag:"dinheiro e contas",color:"#5ad1c4",icon:ICO.auditor,
+    select:()=>{const kw=["pagamento","recibo","fatura","vence","orçamento","contrato","nubank","btg","financeiro","cobran","boleto","pix","invoice"];
+      return topN(real().filter(e=>kw.some(k=>txtOf(e).includes(k))),9);},
+    report:(ev)=>({headline:`${ev.length} itens financeiros para acompanhar`,lead:"Contas, recibos e prazos financeiros na sua caixa.",
+      findings:topN(ev,4).map(e=>({id:e.id,html:`<b>${h(e.sender)}</b> <em>(${e.time})</em>: "${h(e.subject)}".`})),
+      actions:[{l:"Marcar como pago",m:"itens marcados como pagos"},{l:"Alertar vencimentos",m:"alertas criados",g:true}]})},
+  {key:"rede",name:"Analista de Rede",tag:"pessoas importantes",color:"#f08fc0",icon:ICO.rede,
+    select:()=>topN(Object.values(bySender(real())).sort((a,b)=>b.length-a.length).flat(),9),
+    report:(ev)=>{const ranked=Object.entries(bySender(real())).sort((a,b)=>b[1].length-a[1].length);const top=ranked.slice(0,3);
+      return{headline:"Quem importa na sua caixa",lead:"O agente mapeou com quem você mais troca.",
+        findings:top.map(([s,a])=>({id:a[0].id,html:`<b>${h(s)}</b> aparece ${a.length}x. <em>Voz frequente.</em>`})),
+        actions:[{l:"Priorizar remetentes",m:"remetentes priorizados"},{l:"Reconectar",m:"lembrete criado",g:true}]};
+    }},
+  {key:"previsor",name:"Previsor de Problemas",tag:"riscos futuros",color:"#ff6b6b",icon:ICO.previsor,
+    select:()=>{const kw=["vence","prazo","hoje","amanhã","final","urgente","fora do ar","pendente","falha"];
+      return topN([...new Set(real().filter(e=>e.key==="urgente"||(e.key==="aguardando"&&e.hoursAgo>96)||kw.some(k=>txtOf(e).includes(k))))].sort((a,b)=>b.hoursAgo-a.hoursAgo),9);},
+    report:(ev)=>({headline:`${ev.length} riscos se formando`,lead:"Coisas que ainda não são problema, mas viram se ninguém tocar.",
+      findings:topN(ev,4).map(e=>({id:e.id,html:`Pode estourar: "<b>${h(e.subject)}</b>" de ${h(e.sender)} <em>(${e.time})</em>.`})),
+      actions:[{l:"Agir nos críticos",m:"abrindo os críticos"},{l:"Criar lembretes",m:"lembretes criados",g:true}]})}
+];
+const INV_BY_KEY=Object.fromEntries(INVESTIGATIONS.map(i=>[i.key,i]));
+
+const investGroup=document.getElementById("investGroup");
+INVESTIGATIONS.forEach(inv=>{
+  const b=document.createElement("button"); b.className="inv"; b.dataset.key=inv.key;
+  b.style.setProperty("--ic",inv.color); b.setAttribute("aria-pressed","false");
+  b.innerHTML=`<span class="ico">${inv.icon}</span><span class="itx"><span class="inm">${inv.name}</span><span class="itag">${inv.tag}</span></span>`;
+  b.addEventListener("click",()=>setInvestigation(inv.key)); investGroup.appendChild(b);
+});
+
+function igniteCells(ids,color){
+  plate.classList.add("lens-active"); const set=new Set(ids);
+  EMAILS.forEach(em=>{const c=cells[em.id];if(em.void)return;
+    c.classList.remove("lit","focus","tint");
+    if(em.archived){c.classList.add("archived");return;}
+    if(set.has(em.id)){c.style.setProperty("--c",color);c.classList.add("lit");}
+    else c.style.setProperty("--c","var("+LENS_BY_KEY[em.key].color+")");
+  });
+}
+function setInvestigation(key){
+  activeInv=key; activeLens=null; selected.clear();
+  document.querySelectorAll(".inv").forEach(b=>b.setAttribute("aria-pressed",b.dataset.key===key?"true":"false"));
+  const inv=INV_BY_KEY[key]; const ev=inv.select();
+  const sweep=document.getElementById("sweep");
+  sweep.style.setProperty("--c",inv.color); sweep.classList.remove("run"); void sweep.offsetWidth; sweep.classList.add("run");
+  igniteCells(ev.map(e=>e.id),inv.color);
+  document.getElementById("scopeTitle").textContent=inv.name;
+  document.getElementById("readout").textContent=`constelação · ${ev.length} evidências · ${inv.tag}`;
+  renderReport(inv,ev); closeDrawer();
+}
+function renderReport(inv,ev){
+  batchBar.style.display="none";
+  document.getElementById("evDot").style.setProperty("--lc",inv.color);
+  document.getElementById("evTitle").textContent=inv.name;
+  const sum=document.getElementById("evSummary"); sum.style.setProperty("--lc",inv.color);
+  sum.innerHTML=`<b>Investigação:</b> ${inv.tag}.`;
+  const r=inv.report(ev); const wrap=document.createElement("div");
+  wrap.className="report"; wrap.style.setProperty("--lc",inv.color);
+  wrap.innerHTML=`<div class="headline">${r.headline}</div><div class="lead">${r.lead}</div><div class="seclabel">Evidências</div>`;
+  r.findings.forEach(f=>{
+    const el=document.createElement("div"); el.className="finding";
+    if(f.id!=null) el.dataset.id=f.id;
+    el.innerHTML=`<span class="fd"></span><span class="ft">${f.html}</span>`;
+    if(f.id!=null){
+      el.addEventListener("mouseenter",()=>crossHighlight(f.id,true));
+      el.addEventListener("mouseleave",()=>crossHighlight(f.id,false));
+      el.addEventListener("click",()=>{const c=cells[f.id];if(c){c.scrollIntoView({block:"center",behavior:"smooth"});c.classList.add("focus");setTimeout(()=>c.classList.remove("focus"),700);}});
+    }
+    wrap.appendChild(el);
+  });
+  const ar=document.createElement("div"); ar.className="acts-row";
+  r.actions.forEach(a=>{const btn=document.createElement("button");btn.className="pbtn"+(a.g?" ghost":"");btn.textContent=a.l;btn.addEventListener("click",()=>toast(a.m));ar.appendChild(btn);});
+  wrap.appendChild(ar);
+  const note=document.createElement("div"); note.className="evnote";
+  note.textContent=`${ev.length} mensagens acesas na placa como prova desta leitura`;
+  wrap.appendChild(note); evList.innerHTML=""; evList.appendChild(wrap);
+}
+
+/* ── mode switch ── */
+document.querySelectorAll(".modebtn").forEach(b=>b.addEventListener("click",()=>{
+  const m=b.dataset.mode; if(m===mode) return; mode=m;
+  document.querySelectorAll(".modebtn").forEach(x=>x.classList.toggle("on",x.dataset.mode===m));
+  document.getElementById("triageGroup").hidden=m!=="triagem";
+  document.getElementById("investGroup").hidden=m!=="investigacoes";
+  if(m==="triagem"){activeInv=null;document.querySelectorAll(".inv").forEach(b=>b.setAttribute("aria-pressed","false"));setLens(null);}
+  else{activeLens=null;document.querySelectorAll(".lens").forEach(b=>b.setAttribute("aria-pressed","false"));setInvestigation(INVESTIGATIONS[0].key);}
+}));
+
+/* ── init session ── */
+(async()=>{
+  try{
+    const d=await api("/api/session");
+    if(!d.authenticated) try{await api("/api/dev/session",{method:"POST",body:"{}"});}catch{}
+    const gmail=d.connections||{};
+    document.getElementById("leftFoot").textContent=(gmail.googleEmail||d.user?.nome||"")+" · leitura local, nada sai sem seu ok";
+  }catch{}
+})();
+</script>
+</body>
+</html>

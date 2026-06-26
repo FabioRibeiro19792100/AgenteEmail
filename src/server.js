@@ -28,13 +28,17 @@ import {
   nowIso,
   updateOperationalNoteStatus,
   updatePendingAction,
-  upsertWeeklyReportSettings
+  upsertWeeklyReportSettings,
+  getActiveInstructions,
+  saveInstruction,
+  deleteInstruction
 } from "./db.js";
-import { prepareReplyForEmail, refineDraftWithAI, runAgent, runExecutiveAnalysis, runInsightAnalysis } from "./agent.js";
+import { buildDecisionFeed, prepareReplyForEmail, refineDraftWithAI, runAgent, runDailyBriefing, runExecutiveAnalysis, runInboxZeroNext, runInsightAnalysis, runSilentTriage } from "./agent.js";
 import { getConfig, loadEnv, validateConfig } from "./config.js";
 import {
   applyLabel,
   archiveEmail,
+  batchModifyEmails,
   buildGmailAuthUrl,
   createDraft,
   getGmailConnectionStatus,
@@ -45,7 +49,9 @@ import {
   revokeGmailConnection,
   saveGmailConnection,
   sendEmail,
-  sendPlainEmail
+  sendPlainEmail,
+  snoozeEmail,
+  trashEmail
 } from "./google.js";
 import { createSignedState, verifySignedState } from "./security.js";
 
@@ -336,6 +342,7 @@ function routePage(urlPath) {
     "/admin/students": "admin-students.html",
     "/composer": "composer.html",
     "/executive": "executive.html",
+    "/mailflow": "mailflow.html",
     "/connections": "connections.html",
     "/availability": "availability.html"
   };
@@ -1061,6 +1068,34 @@ function applyLabelOperationFromEmail(email, label) {
   };
 }
 
+function trashOperationFromEmail(email) {
+  return {
+    toolName: "trash_email",
+    permissionLevel: 3,
+    title: "Mover para lixo",
+    summary: `Mover para o lixo: "${email.subject || "mensagem"}"`,
+    confirmLabel: "Mover para lixo",
+    editable: false,
+    previewText: `Mensagem: ${email.subject || "sem assunto"}\nRemetente: ${email.from || ""}\nData: ${email.date || ""}`,
+    payload: { messageId: email.id }
+  };
+}
+
+function snoozeOperationFromEmail(email, snoozeDays = 3) {
+  const snoozeDate = new Date(Date.now() + snoozeDays * 24 * 60 * 60 * 1000);
+  const dateLabel = snoozeDate.toISOString().split("T")[0];
+  return {
+    toolName: "snooze_email",
+    permissionLevel: 3,
+    title: `Adiar email por ${snoozeDays} dia(s)`,
+    summary: `Adiar "${email.subject || "mensagem"}" até ${dateLabel}`,
+    confirmLabel: `Adiar até ${dateLabel}`,
+    editable: false,
+    previewText: `Mensagem: ${email.subject || "sem assunto"}\nRemetente: ${email.from || ""}\nAdiado até: ${dateLabel}\nLabel criada: MailFlow/Adiado/${dateLabel}`,
+    payload: { messageId: email.id, snoozeDays }
+  };
+}
+
 async function executePendingAction(user, action, body = {}) {
   const payload = { ...(action.payload || {}) };
   if (action.editable && typeof body.editedContent === "string" && body.editedContent.trim()) {
@@ -1089,6 +1124,10 @@ async function executePendingAction(user, action, body = {}) {
       return applyLabel(user.user_id, payload.messageId, payload.label);
     case "mark_as_read":
       return markAsRead(user.user_id, payload.messageId);
+    case "trash_email":
+      return trashEmail(user.user_id, payload.messageId);
+    case "snooze_email":
+      return snoozeEmail(user.user_id, payload.messageId, payload.snoozeDays || 3);
     default:
       throw new Error("Acao pendente nao suportada.");
   }
@@ -1155,7 +1194,7 @@ async function router(req, res) {
     setCookie(res, "session_id", sessionId);
     return sendJson(res, 200, {
       ok: true,
-      redirectTo: "/executive",
+      redirectTo: "/mailflow",
       user: { nome: user.nome, turma_id: user.turma_id }
     });
   }
@@ -1288,11 +1327,7 @@ async function router(req, res) {
     try {
       const email = await readEmail(user.user_id, body.messageId);
       const pendingAction = await persistPendingAction(user, archiveOperationFromEmail(email));
-      return sendJson(res, 200, {
-        ok: true,
-        message: "Acao preparada. Confirme para arquivar.",
-        pendingAction
-      });
+      return sendJson(res, 200, { ok: true, message: "Pronto para arquivar. Confirme abaixo.", pendingAction });
     } catch (error) {
       return sendJson(res, 400, { error: error.message });
     }
@@ -1306,11 +1341,7 @@ async function router(req, res) {
     try {
       const email = await readEmail(user.user_id, body.messageId);
       const pendingAction = await persistPendingAction(user, markAsReadOperationFromEmail(email));
-      return sendJson(res, 200, {
-        ok: true,
-        message: "Acao preparada. Confirme para marcar como lido.",
-        pendingAction
-      });
+      return sendJson(res, 200, { ok: true, message: "Pronto para marcar lido. Confirme abaixo.", pendingAction });
     } catch (error) {
       return sendJson(res, 400, { error: error.message });
     }
@@ -1323,14 +1354,81 @@ async function router(req, res) {
     if (!body.messageId) return sendJson(res, 400, { error: "messageId obrigatorio." });
     try {
       const email = await readEmail(user.user_id, body.messageId);
-      const pendingAction = await persistPendingAction(
-        user,
-        applyLabelOperationFromEmail(email, body.label || "MailFlow")
-      );
+      const pendingAction = await persistPendingAction(user, applyLabelOperationFromEmail(email, body.label || "MailFlow"));
+      return sendJson(res, 200, { ok: true, message: "Pronto para aplicar label. Confirme abaixo.", pendingAction });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/inbox/actions/trash") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    if (!body.messageId) return sendJson(res, 400, { error: "messageId obrigatorio." });
+    try {
+      const email = await readEmail(user.user_id, body.messageId);
+      const pendingAction = await persistPendingAction(user, trashOperationFromEmail(email));
+      return sendJson(res, 200, { ok: true, message: "Pronto para mover ao lixo. Confirme abaixo.", pendingAction });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/inbox/actions/snooze") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    if (!body.messageId) return sendJson(res, 400, { error: "messageId obrigatorio." });
+    const snoozeDays = Number(body.snoozeDays) || 3;
+    try {
+      const email = await readEmail(user.user_id, body.messageId);
+      const pendingAction = await persistPendingAction(user, snoozeOperationFromEmail(email, snoozeDays));
+      return sendJson(res, 200, { ok: true, message: `Pronto para adiar ${snoozeDays} dia(s). Confirme abaixo.`, pendingAction });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/inbox/actions/batch") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    const ops = Array.isArray(body.operations) ? body.operations : [];
+    if (!ops.length) return sendJson(res, 400, { error: "operations vazio." });
+
+    const allowed = new Set(["archive", "trash", "mark_read"]);
+    const invalid = ops.find((op) => !allowed.has(op.action));
+    if (invalid) return sendJson(res, 400, { error: `Acao em lote nao suportada: ${invalid.action}` });
+
+    const messageIds = ops.map((op) => op.messageId).filter(Boolean);
+    if (!messageIds.length) return sendJson(res, 400, { error: "Nenhum messageId valido." });
+
+    try {
+      const results = { archive: [], trash: [], mark_read: [] };
+
+      const archiveIds = ops.filter((op) => op.action === "archive").map((op) => op.messageId);
+      const trashIds = ops.filter((op) => op.action === "trash").map((op) => op.messageId);
+      const markReadIds = ops.filter((op) => op.action === "mark_read").map((op) => op.messageId);
+
+      if (archiveIds.length) {
+        await batchModifyEmails(user.user_id, archiveIds, { removeLabelIds: ["INBOX"] });
+        results.archive = archiveIds;
+      }
+      if (trashIds.length) {
+        for (const id of trashIds) await trashEmail(user.user_id, id);
+        results.trash = trashIds;
+      }
+      if (markReadIds.length) {
+        await batchModifyEmails(user.user_id, markReadIds, { removeLabelIds: ["UNREAD"] });
+        results.mark_read = markReadIds;
+      }
+
+      const total = archiveIds.length + trashIds.length + markReadIds.length;
       return sendJson(res, 200, {
         ok: true,
-        message: "Acao preparada. Confirme para aplicar a label.",
-        pendingAction
+        message: `${total} email(s) processado(s) com sucesso.`,
+        results
       });
     } catch (error) {
       return sendJson(res, 400, { error: error.message });
@@ -1554,18 +1652,93 @@ async function router(req, res) {
     }
   }
 
+  if (req.method === "GET" && url.pathname === "/api/context/contacts") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    try {
+      const allNotes = await listOperationalNotesForUser(user.user_id);
+      const contacts = allNotes
+        .filter((note) => note.type === "contato_vip" && note.status !== "archived")
+        .map(serializeOperationalNote);
+      return sendJson(res, 200, { ok: true, contacts });
+    } catch {
+      return sendJson(res, 200, { ok: true, contacts: [] });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/context/contacts") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    if (!body.name && !body.email) return sendJson(res, 400, { error: "Nome ou email obrigatorio." });
+    const now = nowIso();
+    const summary = [
+      body.email ? `Email: ${body.email}` : "",
+      body.company ? `Empresa: ${body.company}` : "",
+      body.context ? `Contexto: ${body.context}` : "",
+      body.notes ? `Notas: ${body.notes}` : ""
+    ].filter(Boolean).join("\n");
+    try {
+      const note = await createOperationalNote({
+        id: generateId("contact"),
+        user_id: user.user_id,
+        turma_id: user.turma_id,
+        type: "contato_vip",
+        agent_id: "context",
+        title: body.name || body.email,
+        summary: summary || "Contato VIP salvo manualmente.",
+        next_action: body.nextAction || "",
+        evidence_indexes: [],
+        sources: [],
+        status: "open",
+        created_at: now,
+        updated_at: now
+      });
+      return sendJson(res, 200, { ok: true, contact: serializeOperationalNote(note) });
+    } catch (error) {
+      const note = createFallbackOperationalNote(user, {
+        type: "contato_vip",
+        agent_id: "context",
+        title: body.name || body.email,
+        summary: summary || "Contato VIP salvo manualmente.",
+        next_action: body.nextAction || "",
+        evidenceIndexes: [],
+        sources: []
+      });
+      return sendJson(res, 200, {
+        ok: true,
+        fallback: true,
+        contact: serializeOperationalNote(note),
+        warning: "Contato salvo temporariamente."
+      });
+    }
+  }
+
   if (req.method === "POST" && url.pathname === "/api/executive/analyze") {
     const user = await ensureAuth(req, res);
     if (!user) return;
     const body = await readBody(req);
     try {
+      let vipContacts = [];
+      try {
+        const allNotes = await listOperationalNotesForUser(user.user_id);
+        vipContacts = allNotes
+          .filter((note) => note.type === "contato_vip" && note.status === "open")
+          .map((note) => `- ${note.title}: ${note.summary}`);
+      } catch { /* ignorar se falhar */ }
+
+      const customInstruction = [
+        body.customInstruction || "",
+        vipContacts.length ? `\n\nContatos VIP conhecidos (priorize aparições deles):\n${vipContacts.join("\n")}` : ""
+      ].join("").trim();
+
       const analysis = await runExecutiveAnalysis(user.user_id, {
         agentId: body.agentId || "executive_assistant",
         timeframe: body.timeframe || "30d",
         query: body.query || "",
         maxResults: body.maxResults || 200,
         categories: body.categories || ["primary"],
-        customInstruction: body.customInstruction || ""
+        customInstruction
       });
       await logAction({
         userId: user.user_id,
@@ -1588,6 +1761,165 @@ async function router(req, res) {
           ? "Conecte seu Gmail para gerar a visao executiva."
           : error.message
       });
+    }
+  }
+
+  // ── Instruções do agente ─────────────────────────────────────────────────
+  if (req.method === "GET" && url.pathname === "/api/agent/instructions") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    try {
+      const instructions = await getActiveInstructions(user.user_id);
+      return sendJson(res, 200, { ok: true, instructions });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/agent/instructions") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    if (!body.instruction?.trim()) return sendJson(res, 400, { error: "instruction é obrigatório" });
+    try {
+      const row = await saveInstruction(user.user_id, {
+        instruction: body.instruction.trim(),
+        appliesFrom: body.appliesFrom || new Date().toISOString().slice(0, 10)
+      });
+      return sendJson(res, 201, { ok: true, instruction: row });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/agent/instructions/")) {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const instrId = url.pathname.split("/").pop();
+    try {
+      await deleteInstruction(instrId, user.user_id);
+      return sendJson(res, 200, { ok: true });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  // ── Feed de decisões ─────────────────────────────────────────────────────
+  if (req.method === "POST" && url.pathname === "/api/executive/feed") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    try {
+      const feed = await buildDecisionFeed(user.user_id, {
+        timeframe: body.timeframe || "7d",
+        maxEmails: Number(body.maxEmails) || 100
+      });
+      return sendJson(res, 200, { ok: true, feed });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  // ── Briefing por email ────────────────────────────────────────────────────
+  if (req.method === "POST" && url.pathname === "/api/executive/briefing/send") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    try {
+      const briefing = await runDailyBriefing(user.user_id);
+      const report = briefing.report;
+      const findings = (report?.findings || []).slice(0, 8);
+      const body = [
+        `MailFlow — Briefing ${new Date().toLocaleDateString("pt-BR")}`,
+        "",
+        report?.summary || "",
+        "",
+        ...findings.map((f, i) => [
+          `${i + 1}. ${f.title}`,
+          f.claim || f.whyItMatters || "",
+          f.nextAction ? `→ ${f.nextAction}` : "",
+          ""
+        ].filter(Boolean).join("\n"))
+      ].join("\n");
+
+      const gmail = await import("./google.js");
+      const conn = await import("./db.js");
+      const db = await conn.getGoogleConnection(user.user_id, "gmail");
+      const toEmail = db?.google_email || user.email_informado;
+      if (!toEmail) throw new Error("Não encontrei email de destino.");
+
+      await gmail.sendPlainEmail(user.user_id, {
+        to: toEmail,
+        subject: `MailFlow Briefing — ${new Date().toLocaleDateString("pt-BR")}`,
+        body
+      });
+      return sendJson(res, 200, { ok: true, sentTo: toEmail });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  // ── Modo 1: Briefing diário ──────────────────────────────────────────────
+  if (req.method === "POST" && url.pathname === "/api/executive/briefing") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    try {
+      const result = await runDailyBriefing(user.user_id);
+      return sendJson(res, 200, { ok: true, briefing: result });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  // ── Modo 2: Triagem silenciosa — preview ────────────────────────────────
+  if (req.method === "POST" && url.pathname === "/api/executive/triage/preview") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    try {
+      const result = await runSilentTriage(user.user_id);
+      return sendJson(res, 200, { ok: true, triage: result });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  // ── Modo 2: Triagem silenciosa — executar ───────────────────────────────
+  if (req.method === "POST" && url.pathname === "/api/executive/triage/execute") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    try {
+      const { toArchive = [], toMarkRead = [], toLabel = [] } = body;
+      const results = {};
+      if (toArchive.length) {
+        await batchModifyEmails(user.user_id, toArchive, { removeLabelIds: ["INBOX"] });
+        results.archived = toArchive.length;
+      }
+      if (toMarkRead.length) {
+        await batchModifyEmails(user.user_id, toMarkRead, { removeLabelIds: ["UNREAD"] });
+        results.markedRead = toMarkRead.length;
+      }
+      if (toLabel.length) {
+        for (const item of toLabel) {
+          try { await applyLabel(user.user_id, item.id, item.label || "MailFlow/Comercial"); } catch { /* continua */ }
+        }
+        results.labeled = toLabel.length;
+      }
+      return sendJson(res, 200, { ok: true, results });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
+    }
+  }
+
+  // ── Modo 3: Inbox zero — próximo email ──────────────────────────────────
+  if (req.method === "POST" && url.pathname === "/api/executive/inbox-zero/next") {
+    const user = await ensureAuth(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    try {
+      const result = await runInboxZeroNext(user.user_id, { skipIds: body.skipIds || [] });
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      return sendJson(res, 400, { error: error.message });
     }
   }
 
